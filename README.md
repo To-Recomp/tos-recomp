@@ -1,6 +1,6 @@
-# symphonia-recomp
+# tos-recomp
 
-to-recomp/symphonia-recomp
+to-recomp/tos-recomp
 
 Static recompilation of Tales of Symphonia (GameCube, 2003), the pilot project. Reference dump: PAL French, game ID `GQSF` (two discs). Other regions and platforms are tracked in `dumps.toml` once it exists. The game is prepared once from your own dump, then runs without it.
 
