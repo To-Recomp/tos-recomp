@@ -1,0 +1,39 @@
+# Known dumps for Tales of Symphonia (GameCube). Format 1, read by torecomp::Database.
+#
+# sha1          Whole-image SHA-1 as listed by Redump. A match is "Redump verified".
+# content_sha1  Hash of the game's files (see common/include/torecomp/content.hpp). A match is
+#               "Compatible": same game data, but the image bytes differ (scrubbed, rebuilt).
+#               Regenerate with `torecomp-disc manifest <disc.iso>`.
+#
+# The content_sha1 values below were generated from scrubbed images (padding zeroed) whose
+# SHA-1 does not match Redump. They have not been cross-checked against a Redump-verified image.
+
+format = 1
+
+[[release]]
+id = "gqsf"
+platform = "gamecube"
+region = "France (PAL)"
+title = "Tales of Symphonia (France)"
+status = "unsupported"   # no recomp yet
+tested = false
+
+[[release.disc]]
+game_id = "GQSF"
+disc = 0
+version = 0
+size = 1459978240
+title = "Tales of Symphonia (France) (Disc 1)"
+redump_id = 6511
+sha1 = "d38365eb13f09f185b058826ec3f45e6e1118e66"
+content_sha1 = "db819db00443ba2c6484e81f613b5c5bdfe66180"
+
+[[release.disc]]
+game_id = "GQSF"
+disc = 1
+version = 0
+size = 1459978240
+title = "Tales of Symphonia (France) (Disc 2)"
+redump_id = 6512
+sha1 = "d66b673c9979be546c2253b5de96337981273335"
+content_sha1 = "6b0b1d25532af9a17b1171cb2f9b689b50148ec2"
