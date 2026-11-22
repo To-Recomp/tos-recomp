@@ -1,0 +1,43 @@
+# Never commit game data. Players bring their own copy.
+*.iso
+*.gcm
+*.rvz
+*.ciso
+*.wbfs
+*.nkit.*
+*.bin
+*.cue
+*.img
+*.cso
+*.pbp
+*.sfc
+*.smc
+*.gba
+*.gbc
+*.nds
+*.3ds
+*.nsp
+*.xci
+*.dol
+*.rel
+*.7z
+*.zip
+*.rar
+
+# Extracted or generated game content
+extracted/
+recompdata/
+generated/
+
+# Build output
+build/
+out/
+dist/
+target/
+node_modules/
+.vite/
+
+# Local files
+.env
+*.log
+.DS_Store

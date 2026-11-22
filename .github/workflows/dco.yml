@@ -1,0 +1,20 @@
+name: DCO
+on:
+  pull_request:
+jobs:
+  signoff:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Check Signed-off-by on every commit
+        run: |
+          fail=0
+          for c in $(git rev-list --no-merges "${{ github.event.pull_request.base.sha }}..${{ github.event.pull_request.head.sha }}"); do
+            if ! git show -s --format=%B "$c" | grep -qiE '^Signed-off-by: .+ <.+>$'; then
+              echo "Missing Signed-off-by: $c"
+              fail=1
+            fi
+          done
+          exit $fail
