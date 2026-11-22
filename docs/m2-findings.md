@@ -70,9 +70,22 @@ Further bugs found on the way: a missing function entry for every address reache
 
 With a DSP device (mailboxes, ROM handshake, interrupt) and an AX command-list HLE, the game reached `BTL/BTLvoice.afs` and looped waiting for its partition to load. The cause was the scheduler: the CRI ADX library does its DVD reads from its own guest threads (one wakes up each retrace, then wakes the file-system thread), and they never ran because (1) `OSEnableScheduler` (`0x800FE2B0`) was unnamed while `OSDisableScheduler` was replaced, so the scheduler stayed disabled, and (2) a sleeping thread only ran at a switch point, which the main thread, spinning on `DVDGetDriveStatus`, never reached. `sched::poll()` now stands in for the decrementer and retrace interrupts.
 
-Result (checked on Linux, screenshots compared with Dolphin on the same disc): after "Continuer sans sauvegarder" the game shows **LICENSED BY NINTENDO**, **namco Produced by NAMCO**, **NAMCO TALES STUDIO LTD.**, then starts the intro movie, which is garbled. Then it opens `map/tit_t00.bin`, `lloyd_ex.bin`, `title.tpl`. About 1 800 frames in 45 s, 0 unknown GP commands. The Namco logo of M2 is reached; the title screen and sound (the AX voice path is unit-tested only) are not.
+Result at that stage (screenshots compared with Dolphin on the same disc): after "Continuer sans sauvegarder" the game showed **LICENSED BY NINTENDO**, **namco Produced by NAMCO**, **NAMCO TALES STUDIO LTD.**, then started the intro movie, which was garbled (fixed below). About 1 800 frames in 45 s, 0 unknown GP commands.
 
-Still missing: a real VI retrace interrupt and decrementer time slicing, the intro movie (garbled), the title screen.
+### The intro movie and the title screen (fixed in gcrecomp)
+
+Four more root causes, none visible from where the symptom was:
+
+| Symptom | Cause | Fix |
+| --- | --- | --- |
+| intro movie never opened; `strtod`/`sprintf("%f")` looped | `DVDFastOpen` ran recompiled SDK code with no FST; the recompiler dropped the record bit (cr0 update) of `adde.`, `subfe.`, `slw.`, `rlwimi.` ..., so the Metrowerks 64-bit divide was wrong | `DVDFastOpen` HLE; record bit emitted (#29) |
+| every SDK matrix wrong (stretched bands on the title scene) | the recompiler kept ps0 in a separate array from the scalar `f[i]`: `fmadds` wrote one, `psq_l` the other; `ps_*` aliasing; `psq` saturation; `fctiw` | one register file, `ps_*`/`psq_*` fixed (#30), `stfiwx` (#31) |
+| title scene black | the GX cull mode mapped to the wrong GL face (GX screen y is down) | faces swapped (#33) |
+| VI and alarms | `sched::poll()` heuristics | real 59.94 Hz VI retrace interrupt (#27) |
+
+Result (screenshots on Linux, compared with Dolphin): after the card dialog, **LICENSED BY NINTENDO**, namco logo, **NAMCO TALES STUDIO LTD.**, the intro movie (HVQM4, played by the game's own code), then the **title screen** with the logo and the menu "Nouvelle partie / Charger partie / Configurer"; the demo movie restarts after idle. The music is audible; the title BGM has a silent right channel (the game's buffers already hold zeros), unexplained. M2 (Namco logo and title screen) is met.
+
+Not done: driving the menu into the game, the right audio channel, other scenes (culling checked only on the title scene), the D3D11 backend (not checked for the same inversion), the title menu text looks thin.
 
 ## SDK identification (decided: identify by signature)
 
