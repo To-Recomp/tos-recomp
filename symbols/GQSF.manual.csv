@@ -1,6 +1,7 @@
 # Names established by hand from behavior. Format: addr,name  # evidence
 # Each entry is a hypothesis until the game runs correctly with it.
-0x800F9528,OSReport  # variadic prologue (r3-r10 and f1-f8 saved to the stack), format string in r3; called by game init code; sits just before OSSetErrorHandler (OSError.c); the game spun here waiting on the EXI UART, which is where OSReport writes
+0x800F94A8,OSReport  # variadic prologue (r3-r10, f1-f8 saved), then builds a va_list and calls vprintf (0x8012503C) with (fmt, va_list); callers pass a printf format in r3 (scripts/dol-disasm.py --callers 0x800F94A8)
+0x800F9528,OSPanic  # variadic; every caller passes (file string in r3, line number in r4, message in r5: e.g. li r4,0xBA5 / addi r5,r2,-0x7fe0), the OSPanic(file, line, msg, ...) signature; not OSReport (it was named OSReport by hand in error); scripts/dol-disasm.py --callers 0x800F9528
 0x80102160,DVDClose  # calls DVDCancel(&file->cb) and returns; sits right after DVDOpen (dvdfs.c order: DVDFastOpen, DVDOpen, DVDClose); the game reached it after its first DVDOpen/read of pal_fontb0.dat and then spun inside the recompiled DVDCancel
 0x801080C4,PADInit  # called right after VIInit in the game's boot function (the SDK init order is OSInit, DVDInit, ..., CARDInit, VIInit, PADInit); fuzzy match 0.98 against Wind Waker's PADInit
 0x801082DC,PADRead  # next function of Pad.c after PADInit/PADControlMotor order; fuzzy match 0.99 against Wind Waker's PADRead; unverified start
