@@ -8,13 +8,13 @@ Reference: PAL French disc 1 (`GQSF`), `sys/main.dol` extracted with `torecomp-d
 - Control-flow analysis finds 4 346 functions, 122 472 basic blocks, 830 191 instructions, in 0.16 s. No symbol map was supplied.
 - Code generation writes 22 C++ files (about 66 MB) in 0.3 s.
 - All 22 generated files compile at `-O0` in 11 s on 16 cores, once `recomp_common.h` includes `<cmath>` (fixed in the gcrecomp fork).
-- The runtime libraries (`gcrecomp_runtime`, `_gx`, `_audio`, `_input`) compile on Linux. The GX backend is Direct3D 11, so it does nothing useful there.
+- The runtime libraries (`gcrecomp_runtime`, `_gx`, `_audio`, `_input`) compile on Linux. `gcrecomp_gx` has a Direct3D 11 backend only; graphics on Linux come from the new `gcrecomp_gp` (below).
 
 ## What does not exist yet
 
-1. **No Linux graphics backend.** `gcrecomp_gx` only has Direct3D 11, and its GX functions are a C++ API, not bound to the guest calling convention. Reaching the Namco logo needs GX bound to guest calls and a Vulkan or OpenGL backend through SDL3.
-2. **Audio and input backends** are Windows-only (XAudio2, XInput).
-3. **Unnamed hardware-touching SDK code**: EXI, SI, DSP, and short leaf functions that no signature matched.
+1. **Audio** (AI, DSP, AX) and **controller** (PAD) input.
+2. **Unnamed hardware-touching SDK code**: EXI, SI, DSP, and short leaf functions that no signature matched.
+3. **GP features**: lighting (vertex colors are used as they are), palette textures (C4/C8/C14X2), EFB-to-texture copies, indirect TEV stages, fog, mipmaps. The renderer is OpenGL 3.3 through SDL3 and has only been run on Linux (Mesa, AMD).
 
 ## First boot (`src/main.cpp`, `tos_boot`)
 
@@ -31,9 +31,24 @@ Each stall was a function waiting for hardware that does not exist, and each fix
 | SIGFPE in a GX function | `divw` by zero traps on x86 | recompiler emits the Gekko result (`-1` or `0`) |
 | DVD status loop | driver state machine driven by DI interrupts | `dvd_funcs.cpp`: idle drive, disc present, immediate async reads |
 | spin in `DVDCancel` | `DVDClose` was unnamed, so the raw driver ran | named by hand |
-| **now**: `GXDrawDone` | waits for the GP "draw done" interrupt | not done: needs GX bound to the guest |
+| `GXDrawDone` | waits for the GP "draw done" interrupt | replaced in `gx_funcs.cpp`; see the next section |
 
-Not reached: the Namco logo, the title screen. No picture, no sound. The first milestone of Q40 (M2) is **not** met.
+## Graphics: the GP module (`gcrecomp/src/gp`)
+
+The SDK's GX functions only encode commands into the write-gather pipe at `0xCC008000`. Instead of replacing each GX function, the recompiled SDK code runs unchanged and `gcrecomp_gp` consumes the stream it writes: it parses CP/XF/BP loads and draw commands, keeps the register state, decodes vertices (all component formats, indexed arrays, display-list calls), transforms them with the XF matrices, and draws through an OpenGL fragment shader that implements up to 16 TEV stages from uniforms. A copy to the external frame buffer presents a frame. Only `GXDrawDone` is replaced (it must not wait for an interrupt).
+
+Four bugs stood between the first draw and the first correct picture; none was visible from the GP side:
+
+| Symptom | Cause | Fix |
+| --- | --- | --- |
+| garbage BP state, NaN projection | the game records display lists by pointing the CPU FIFO away from the GP FIFO (PI vs CP registers); the data was executed instead of stored | `wgp_write` stores into memory at the PI write pointer when the FIFOs differ |
+| projection built from zeros | `load_dol` cleared BSS after copying sections, but the BSS range spans the small-data sections (`.sdata2` constants) | clear first, then copy |
+| viewport width 0 | `fsubs` rounded its operands to single before subtracting; the int-to-float trick (`2^52 + n - 2^52`) gave 0 | single-precision ops compute in double, then round |
+| second element of `psq_st` lost | paired stores advanced the address, but the write-gather pipe is a single address | `psq_next_addr` |
+
+Result: with `TOS_SCREENSHOT_DIR` set, `tos_boot` saves presented frames. About 58 frames per second are presented, with no unknown command in the stream. The frames show an animated element drawn by the game itself (a bar that fills over time, drawn twice), on black. The title screen has not been reached; the game is waiting in its loading loop. The picture is a game asset, so no screenshot is kept in the repository.
+
+Not reached: the Namco logo and the title screen. No sound. The first milestone of Q40 (M2) is **not** met.
 
 ## SDK identification (decided: identify by signature)
 
