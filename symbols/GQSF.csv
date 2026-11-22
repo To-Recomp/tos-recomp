@@ -17,7 +17,7 @@
 0x800F7E8C,OSAllocFromHeap
 0x800F7F88,OSFreeToHeap
 0x800F8014,OSInitAlloc
-0x800F8084,OSCreateHeap
+# 0x800F8084,OSCreateHeap  (not bound: gcrecomp HLE builds its own heap layout, but OSAllocFromHeap runs the SDK code that reads __OSHeapArray; mixing them made every game allocation return NULL)
 0x800F8164,OSCheckHeap
 0x800F84E4,OSAllocFromArenaLo
 0x800F8510,__OSInitAudioSystem

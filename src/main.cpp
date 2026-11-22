@@ -64,6 +64,10 @@ int main(int argc, char** argv) {
   GameConfig config;
   std::memcpy(config.game_id, "GQSF", 4);
   std::memcpy(config.company_code, "AF", 2);
+  // As on a retail console, the loader leaves the arena's low bound unset and the game's OSInit
+  // derives it from the end of the DOL. The game hard-codes a heap at 0x804E4000 that must not
+  // overlap the arena, so a fixed 0x80400000 plus the game's own arena allocations overlapped it.
+  config.arena_lo = 0;
   init_low_memory(&g_mem, config);
   set_game_root(argv[2]);
 

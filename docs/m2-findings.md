@@ -52,7 +52,17 @@ Result: with `TOS_SCREENSHOT_DIR` set, `tos_boot` saves presented frames; `TOS_S
 
 What the game shows, in order, on black: an animated bar (a loading indicator), then its own dialog **"Aucune carte mémoire détectée. Tales of Symphonia nécessite 1 fichier et 3 blocs pour être sauvegardé. Continuer sans sauvegarder / Réessayer"**, with the font drawn from palette textures. Pressing a button through the PAD replacement moves the game to the next screen ("Insérez carte mémoire." with a "Retour" prompt), so input works end to end. After Up then A the game stops presenting frames (178 in total): backtraces show it in functions at `0x8016xxxx`-`0x8017xxxx`, polling `DVDGetDriveStatus` tens of millions of times and printing through an `OSReport`-like function. The `ADXGCSDK` string in the DOL makes the CRI ADX audio library the likely owner of that code (inference, not checked). The Namco logo has not been reached.
 
-Known defect: the dialog is drawn twice, mirrored about the screen center, and smaller than the clip coordinates suggest. The cause is not found. The pictures are game assets, so none is kept in the repository.
+The dialog was never drawn twice: that was a bug of the harness's screenshot code (`write_screenshot` read the EFB with the window's pitch). Fixed in gcrecomp (#7). Earlier positions measured from those screenshots were wrong.
+
+### The stall after the dialog: three causes in a row (found with gdb and the game's own error messages)
+
+| Observation | Cause | Fix |
+| --- | --- | --- |
+| `E0041303: illigal parameter 'ptid' (ADXF_GetPtStat)` printed in a loop; `GCSYS.c` assertions | the game's heap allocator returned NULL for every allocation (`ADXT_Create: parameter error`, work area NULL). gcrecomp's HLE `OSCreateHeap` builds its own heap layout, but `OSAllocFromHeap` is the recompiled SDK function, which reads the SDK's heap array | `OSCreateHeap` is no longer bound (commented in `GQSF.csv`); the SDK code creates the heaps |
+| the heap list was walked into code bytes (`Bad address 0x40820010`), `OSAllocFromHeap` looped | the harness set the arena low bound to `0x80400000`; the game hard-codes a heap at `0x804E4000` and its own arena allocations reached `0x8054F000`, overlapping it | `config.arena_lo = 0`: as on a console, `OSInit` derives it from the end of the DOL |
+| `[Poll] Read16 0xCC005000 = 0x80F3` forever (`func_8015BA88`, the SDK's DSP boot task) | no DSP: the boot task sends mails to the DSP and waits for it to take them; the game then needs the DSP to answer | open: gcrecomp needs a DSP device (mailboxes, control register, interrupts). The game ships its own microcode (0x19E0 bytes at `0x802B7B40`), so a complete answer needs a DSP interpreter |
+
+After the first two fixes the game loads all the character data (`regal*.bin`, `kratos*.bin`, ... `BTL/btlusual.dat`, `field_sil.so`) and the sound files, then reaches the DSP boot task. No frame is presented after the dialog yet.
 
 Further bugs found on the way: a missing function entry for every address reached only through a function pointer (`symbols/GQSF.extra_funcs.txt`, found by running the game and adding each "unresolved call"), and `PADInit`/`PADRead` being unnamed (named by hand).
 
