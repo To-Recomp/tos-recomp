@@ -15,3 +15,4 @@
 0x800FB230,OSDisableInterrupts  # mfmsr/mtmsr; found by the DspDevice agent (recompiled with no-op mfmsr/mtmsr they return 0)
 0x800FB244,OSEnableInterrupts  # same
 0x800FE2B0,OSEnableScheduler  # counterpart of OSDisableScheduler (0x800FE270, HLE); left recompiled it desynchronised the scheduler counter (gcrecomp PR #25)
+0x80105640,__VIRetraceHandler  # real entry (sets up r3/r5 and saves LR); the fuzzy match 0x80105654 was inside the function (found by the ViRetrace agent, gcrecomp PR #27)
