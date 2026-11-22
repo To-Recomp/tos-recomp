@@ -1,0 +1,4 @@
+# Names established by hand from behavior. Format: addr,name  # evidence
+# Each entry is a hypothesis until the game runs correctly with it.
+0x800F9528,OSReport  # variadic prologue (r3-r10 and f1-f8 saved to the stack), format string in r3; called by game init code; sits just before OSSetErrorHandler (OSError.c); the game spun here waiting on the EXI UART, which is where OSReport writes
+0x80102160,DVDClose  # calls DVDCancel(&file->cb) and returns; sits right after DVDOpen (dvdfs.c order: DVDFastOpen, DVDOpen, DVDClose); the game reached it after its first DVDOpen/read of pal_fontb0.dat and then spun inside the recompiled DVDCancel

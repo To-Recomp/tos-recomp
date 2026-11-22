@@ -12,12 +12,28 @@ Reference: PAL French disc 1 (`GQSF`), `sys/main.dol` extracted with `torecomp-d
 
 ## What does not exist yet
 
-Nothing has been linked or executed. Not done:
+1. **No Linux graphics backend.** `gcrecomp_gx` only has Direct3D 11, and its GX functions are a C++ API, not bound to the guest calling convention. Reaching the Namco logo needs GX bound to guest calls and a Vulkan or OpenGL backend through SDL3.
+2. **Audio and input backends** are Windows-only (XAudio2, XInput).
+3. **Unnamed hardware-touching SDK code**: EXI, SI, DSP, and short leaf functions that no signature matched.
 
-1. **No symbol map for Symphonia.** The Dolphin OS/SDK is statically linked into `main.dol`. gcrecomp replaces SDK functions (OSInit, DVDRead, VIWaitForRetrace, GX*, PAD*, CARD*...) by *address*, taken from a symbol map. Without one, the recompiled SDK code runs as is. About 2 000 sites in the generated code load hardware-register bases (`0xCC000000`, `0xCC010000`, ...) and touch them directly.
-2. **No Linux graphics backend.** `gcrecomp_gx` only has Direct3D 11. Reaching the Namco logo needs a GX-to-Vulkan or OpenGL backend through SDL3.
-3. **Audio and input backends** are Windows-only (XAudio2, XInput).
-4. **No boot code**: nothing maps `main.dol` and the disc files, sets the SDA bases, registers the generated functions, or calls the entry point.
+## First boot (`src/main.cpp`, `tos_boot`)
+
+`tos_boot` loads `main.dol` into emulated RAM, registers the recompiled functions and calls `__start` (`0x80003154`). The recompiler now emits, in every function that has a symbol-map name, a check for a native replacement (`lookup_os_func`) before the recompiled body, so direct calls reach the HLE.
+
+Observed on the real disc 1, in order: `__OSInitSystemCall`, `CARDInit`, `VIInit`, three `OSCreateHeap` calls with the game's own sizes (2.5 MB, 6 MB, 5 MB), `ARInit`, `ARQInit`, `VIConfigure`, GX initialization, `VISetBlack`, `VISetNextFrameBuffer`, `VIFlush`, then the first disc access: `DVDOpen("pal_fontb0.dat")`, a real file of the extracted disc.
+
+Each stall was a function waiting for hardware that does not exist, and each fix was one HLE or one recompiler fix:
+
+| Stall | Cause | Fix |
+| --- | --- | --- |
+| `__ARChecksize` | probes ARAM size through DMA registers | `ar_funcs.cpp`: ARAM as a host buffer, immediate DMA and ARQ |
+| `OSReport` (EXI UART) | unnamed variadic function writing to the EXI UART | named by hand in `symbols/GQSF.manual.csv`, bound to the existing HLE |
+| SIGFPE in a GX function | `divw` by zero traps on x86 | recompiler emits the Gekko result (`-1` or `0`) |
+| DVD status loop | driver state machine driven by DI interrupts | `dvd_funcs.cpp`: idle drive, disc present, immediate async reads |
+| spin in `DVDCancel` | `DVDClose` was unnamed, so the raw driver ran | named by hand |
+| **now**: `GXDrawDone` | waits for the GP "draw done" interrupt | not done: needs GX bound to the guest |
+
+Not reached: the Namco logo, the title screen. No picture, no sound. The first milestone of Q40 (M2) is **not** met.
 
 ## SDK identification (decided: identify by signature)
 
@@ -41,6 +57,6 @@ How far to trust it:
 
 ## Next
 
-1. Bind the named SDK functions to the gcrecomp runtime (HLE) for OS, DVD, VI, PAD, CARD first.
-2. Handle the functions still unnamed that touch hardware registers (EXI, SI, DSP).
-3. Add a Linux graphics backend for GX, then audio and input.
+1. Bind the GX functions to guest calls (`GXDrawDone` first), with a Linux backend behind them (Vulkan or OpenGL through SDL3).
+2. Continue the stall-and-fix loop: PAD, then the audio path (AI, DSP, AX), then the remaining DVD and CARD functions.
+3. Name the SDK functions that no signature matched, from their behavior, each with its evidence in `symbols/GQSF.manual.csv`.
