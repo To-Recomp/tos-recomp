@@ -44,7 +44,7 @@ A function that has a name gets, at its entry, a check for a native replacement 
 ## 4. Finding out where the game is stuck
 
 - The watchdog in `src/main.cpp` prints, when `run.sh` ends, the last indirect dispatch, the per-function counts of replaced calls (`[hle]`), and GP statistics (`[gp]`). Counts in the tens of millions point at a polling loop.
-- `[FuncTable] Unresolved call to 0x...` means an indirect call to an address that is not a function entry: add the address to `symbols/GQSF.extra_funcs.txt` and run `regen.sh`.
+- `[FuncTable] Unresolved call to 0x...` means an indirect call to an address that is not a function entry (typically a callback built with `lis`/`addi`): run `scripts/add-unresolved.sh run.log` (it appends the addresses to `symbols/GQSF.extra_funcs.txt`; `--dry-run` only lists them), review them, then `regen.sh`.
 - Attach `gdb` to the running process (`gdb -p PID -batch -ex "thread 1" -ex "bt 20"`). Generated functions are named `func_XXXXXXXX`, replaced SDK functions by their SDK name.
 
 ## 5. Conventions
