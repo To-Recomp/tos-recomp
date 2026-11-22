@@ -19,11 +19,28 @@ Nothing has been linked or executed. Not done:
 3. **Audio and input backends** are Windows-only (XAudio2, XInput).
 4. **No boot code**: nothing maps `main.dol` and the disc files, sets the SDA bases, registers the generated functions, or calls the entry point.
 
-## Decision needed before going further
+## SDK identification (decided: identify by signature)
 
-The wall is item 1. Two ways through it:
+`main.dol` carries the *Dolphin SDK* of April 2003 (OS `Apr 17 2003`, GX `Apr 21 2003`, DVD `Apr 22 2003`). Reference games whose decompilation projects published symbol maps (CC0) use other builds: Wind Waker PAL `GZLP01` (Sep 2002) and Twilight Princess PAL `GZ2P01` (Apr and Nov 2004). Symphonia sits between them.
 
-- **Identify the SDK by signature**: match functions in the DOL against known SDK code (libogc is zlib-licensed, but it is a different SDK from Nintendo's; matches may be partial) to build a symbol map, then bind them to the runtime's HLE.
-- **Emulate the hardware registers** the SDK touches, so the SDK code runs unchanged. That is closer to an emulator and abandons the HLE approach gcrecomp is built around.
+`tools/sdk-identify/identify.py` builds masked signatures (addresses and immediates removed) of each reference SDK function, matches them against the 4 346 functions of `main.dol`, keeps the matches that are consistent with the SDK's source-file link order, and pairs the functions in between when counts agree.
 
-No decision has been made.
+Result (`symbols/GQSF.csv`, details in `symbols/GQSF.matches.tsv`):
+
+- 499 functions named out of about 800 reference SDK functions: 163 exact, 274 fuzzy, 62 by layout.
+- 436 entries in the CSV: those whose first instructions equal the reference's (start verified), or that both references name identically.
+- Covered: OS (threads, alarms, heap, context), DVD, VI, PAD, AI, AR, CARD, GX (init, FIFO, textures, TEV, transform), MTX.
+- Not found: EXI, SI, DSP, most of OSMutex/OSMessage, `OSReport`, `DVDRead`. Their code changed between builds or is too short to match.
+
+How far to trust it:
+
+- The two references, independent, name the same address identically for 354 of the 357 addresses both name (99.2%).
+- `OSInit` at `0x800F6F00` is named by Wind Waker only (fuzzy, 0.84). It is also the function that loads the `Dolphin SDK - OS` version string, which is independent evidence. It is not in the CSV because its start is not verified.
+- Fuzzy matching can name an address that lies inside the real function. The start check and the agreement rule exist for that reason. Names that are in `.matches.tsv` but not in the CSV have not been confirmed this way and must not be bound to the runtime yet.
+- Nothing here has been run. A wrong name bound to the HLE would replace the wrong function.
+
+## Next
+
+1. Bind the named SDK functions to the gcrecomp runtime (HLE) for OS, DVD, VI, PAD, CARD first.
+2. Handle the functions still unnamed that touch hardware registers (EXI, SI, DSP).
+3. Add a Linux graphics backend for GX, then audio and input.
