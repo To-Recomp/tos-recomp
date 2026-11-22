@@ -16,3 +16,5 @@
 0x800FB244,OSEnableInterrupts  # same
 0x800FE2B0,OSEnableScheduler  # counterpart of OSDisableScheduler (0x800FE270, HLE); left recompiled it desynchronised the scheduler counter (gcrecomp PR #25)
 0x80105640,__VIRetraceHandler  # real entry (sets up r3/r5 and saves LR); the fuzzy match 0x80105654 was inside the function (found by the ViRetrace agent, gcrecomp PR #27)
+0x80109CE0,ARGetBaseAddress  # found by the FieldFade agent: ARGetSize reads __AR_Size, never set because ARInit is HLE; HLE answers it
+0x80109CE8,ARGetSize  # same

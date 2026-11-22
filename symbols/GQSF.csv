@@ -429,3 +429,5 @@
 0x80111B74,CARDDelete
 0x800FB230,OSDisableInterrupts
 0x800FB244,OSEnableInterrupts
+0x80109CE0,ARGetBaseAddress
+0x80109CE8,ARGetSize
