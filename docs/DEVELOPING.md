@@ -41,6 +41,10 @@ tos-recomp/scripts/run.sh 30     # 30 seconds, opens a window
 
 A function that has a name gets, at its entry, a check for a native replacement (`lookup_os_func` in `gcrecomp/src/os/`). Adding a replacement means adding a name to one of the tables there and making sure the address is named in the CSV.
 
+## 3b. Merging SDK names
+
+Binding a name makes the recompiler emit `lookup_os_func(name)` at the function entry: a gcrecomp HLE of that name REPLACES the recompiled SDK function, so a wrong name, or an HLE written for another SDK data layout, breaks the game. `scripts/merge-sdk-names.py` lists, for every change, whether the name has an HLE (parsed from the lookup tables in `gcrecomp/src/os`). Merge in groups, regenerate with `scripts/try-symbols.sh` after each, and keep a group only if the new-game script still reaches the classroom with the same timeline (`wait 800` at about frame 6740, `[gp]` about 7100 frames at 190 s). Names without an HLE are only labels (readable traces, `GCRECOMP_TRACE_*`). Names that are known to break are in `docs/sdk-names.md` and are passed to `--exclude`.
+
 ## 4. Finding out where the game is stuck
 
 - The watchdog in `src/main.cpp` prints, when `run.sh` ends, the last indirect dispatch, the per-function counts of replaced calls (`[hle]`), and GP statistics (`[gp]`). Counts in the tens of millions point at a polling loop.
@@ -56,6 +60,9 @@ Nothing used to debug the game should be a throwaway: add it under `scripts/` (o
 | `scripts/guest-gdb.sh --break func_8016EF28 --args "r3 r4" --mem 0x80359940:4 --bt 6 --ignore 20000` | Breakpoints on guest functions of the running game: prints guest registers and RAM words (decoded from the harness calling convention, no debug info needed) and the guest call chain. |
 | `scripts/contact-sheet.sh <frames-dir> out.png --count 6` | One picture from a whole run: works on `TOS_SCREENSHOT_DIR` PPM files and on Dolphin's frame dump, to compare a run with the reference. Keep the output out of git. |
 | `fepor-recomp/tools/dolphin-run.sh` (owner's other project) | Runs the disc in Dolphin with scripted input and a frame dump, to get the reference frames. |
+| `scripts/merge-sdk-names.py --v2 tools/sdk-identify/results/GQSF.v2.csv --dry-run [--groups os,dvd,...] [--exclude A,B] [--evidence X.new.tsv --markdown t.md]` | Merges an sdk-identify result into `symbols/GQSF.csv` (new / renamed / moved-start names, in groups) and reports which names are bound to a gcrecomp HLE (see "Merging SDK names"). |
+| `scripts/try-symbols.sh --csv C --work /var/tmp/x --dol main.dol --files DIR [--seconds 190]` | Regenerates the code from a CSV into its own work directory (the shared `generated/` is untouched), builds `tos_boot` there (`-j4`, nice), runs the new-game input script and writes `summary.txt` (script markers, `[hle]` counts, `[gp]` frames). Delete the work dir afterwards. |
+| `scripts/dol-disasm.py main.dol --range A:B` / `--callers ADDR` | Disassembles a DOL range and lists the direct callers of an address with the instructions that set r3-r5 (to tell `OSReport(fmt, ...)` from `OSPanic(file, line, msg, ...)`). Needs `capstone`. |
 
 The runtime's own diagnostics are environment variables, listed in `scripts/run.sh` (`TOS_SCRIPT`, `TOS_SCREENSHOT_DIR`, `GP_TRACE`, `GP_DUMP_TEX`, ...).
 
