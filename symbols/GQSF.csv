@@ -426,3 +426,5 @@
 0x80111218,CARDCreate
 0x80111A64,CARDDeleteAsync
 0x80111B74,CARDDelete
+0x800FB230,OSDisableInterrupts
+0x800FB244,OSEnableInterrupts
