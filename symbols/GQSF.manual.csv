@@ -4,3 +4,11 @@
 0x80102160,DVDClose  # calls DVDCancel(&file->cb) and returns; sits right after DVDOpen (dvdfs.c order: DVDFastOpen, DVDOpen, DVDClose); the game reached it after its first DVDOpen/read of pal_fontb0.dat and then spun inside the recompiled DVDCancel
 0x801080C4,PADInit  # called right after VIInit in the game's boot function (the SDK init order is OSInit, DVDInit, ..., CARDInit, VIInit, PADInit); fuzzy match 0.98 against Wind Waker's PADInit
 0x801082DC,PADRead  # next function of Pad.c after PADInit/PADControlMotor order; fuzzy match 0.99 against Wind Waker's PADRead; unverified start
+0x801091E8,AIRegisterDMACallback  # identified from callees by the gcrecomp#2/#3 agents; not verified against a reference map
+0x8010C994,CARDGetResultCode  # identified from callees by the gcrecomp#2/#3 agents; not verified against a reference map
+0x8010F658,CARDCheckAsync  # identified from callees by the gcrecomp#2/#3 agents; not verified against a reference map
+0x80110894,CARDFormatAsync  # identified from callees by the gcrecomp#2/#3 agents; not verified against a reference map
+0x80110D50,CARDOpen  # identified from callees by the gcrecomp#2/#3 agents; not verified against a reference map
+0x80111218,CARDCreate  # identified from callees by the gcrecomp#2/#3 agents; not verified against a reference map
+0x80111A64,CARDDeleteAsync  # identified from callees by the gcrecomp#2/#3 agents; not verified against a reference map
+0x80111B74,CARDDelete  # identified from callees by the gcrecomp#2/#3 agents; not verified against a reference map

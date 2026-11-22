@@ -23,5 +23,5 @@ rm -rf "$out"
   --extra-funcs "$here/symbols/GQSF.extra_funcs.txt" \
   --output "$out" --project tos
 
-cmake -S "$here" -B "$here/build" -G Ninja
+cmake -S "$here" -B "$here/build" -G Ninja -DGCRECOMP_DIR="$gcrecomp"
 cmake --build "$here/build"
