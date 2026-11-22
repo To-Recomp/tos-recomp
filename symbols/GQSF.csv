@@ -84,6 +84,7 @@
 0x800FE094,__OSInitSystemCall
 0x800FE0FC,__OSThreadInit
 0x800FE270,OSDisableScheduler
+0x800FE2B0,OSEnableScheduler
 0x800FE2F0,UnsetRun
 0x800FE358,__OSGetEffectivePriority
 0x800FE394,SetEffectivePriority
@@ -197,7 +198,7 @@
 0x801053D0,__DVDPrintFatalMessage
 0x8010540C,cb
 0x801054D8,__fstLoad
-0x80105654,__VIRetraceHandler
+0x80105640,__VIRetraceHandler
 0x80105B54,VIInit
 0x80106004,VIWaitForRetrace
 0x80106058,setFbbRegs
