@@ -47,6 +47,18 @@ A function that has a name gets, at its entry, a check for a native replacement 
 - `[FuncTable] Unresolved call to 0x...` means an indirect call to an address that is not a function entry: add the address to `symbols/GQSF.extra_funcs.txt` and run `regen.sh`.
 - Attach `gdb` to the running process (`gdb -p PID -batch -ex "thread 1" -ex "bt 20"`). Generated functions are named `func_XXXXXXXX`, replaced SDK functions by their SDK name.
 
+## 4b. Debugging tools (reusable, keep them)
+
+Nothing used to debug the game should be a throwaway: add it under `scripts/` (or to `common`/`tools`/`gcrecomp` if it is general), with `--help`, arguments instead of hard-coded paths, and a line here.
+
+| Tool | Use |
+| --- | --- |
+| `scripts/guest-gdb.sh --break func_8016EF28 --args "r3 r4" --mem 0x80359940:4 --bt 6 --ignore 20000` | Breakpoints on guest functions of the running game: prints guest registers and RAM words (decoded from the harness calling convention, no debug info needed) and the guest call chain. |
+| `scripts/contact-sheet.sh <frames-dir> out.png --count 6` | One picture from a whole run: works on `TOS_SCREENSHOT_DIR` PPM files and on Dolphin's frame dump, to compare a run with the reference. Keep the output out of git. |
+| `fepor-recomp/tools/dolphin-run.sh` (owner's other project) | Runs the disc in Dolphin with scripted input and a frame dump, to get the reference frames. |
+
+The runtime's own diagnostics are environment variables, listed in `scripts/run.sh` (`TOS_SCRIPT`, `TOS_SCREENSHOT_DIR`, `GP_TRACE`, `GP_DUMP_TEX`, ...).
+
 ## 5. Conventions
 
 - English for code, commits, issues. GPL v3 for this repository, MIT for the `gcrecomp` fork. Sign every commit (`git commit -s`): a CI check enforces it.
