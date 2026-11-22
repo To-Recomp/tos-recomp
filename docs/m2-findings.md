@@ -12,9 +12,11 @@ Reference: PAL French disc 1 (`GQSF`), `sys/main.dol` extracted with `torecomp-d
 
 ## What does not exist yet
 
-1. **Audio** (AI, DSP, AX) and **controller** (PAD) input.
-2. **Unnamed hardware-touching SDK code**: EXI, SI, DSP, and short leaf functions that no signature matched.
-3. **GP features**: lighting (vertex colors are used as they are), palette textures (C4/C8/C14X2), EFB-to-texture copies, indirect TEV stages, fog, mipmaps. The renderer is OpenGL 3.3 through SDL3 and has only been run on Linux (Mesa, AMD).
+1. **Audio** (AI, DSP, AX).
+2. **Guest threads.** The runtime does not run them: `OSCreateThread` only fills the structure and the scheduler calls (`OSSuspendThread`, `OSDisableScheduler`, ...) are no-ops, because the SDK's scheduler spins when nothing is runnable. A game whose logic needs its other threads (the CRI ADX audio library does) will not get past that point.
+3. **A memory card.** `CARDProbeEx` reports no card. The card functions that remain are stubs that report success without storing anything. Saves in the console's own format (a memory card image) are not implemented.
+4. **Unnamed hardware-touching SDK code**: EXI, SI, DSP, and short leaf functions that no signature matched.
+5. **GP features**: lighting (vertex colors are used as they are), palette textures with 14-bit indices (C14X2), EFB-to-texture copies, indirect TEV stages, fog, mipmaps. The renderer is OpenGL 3.3 through SDL3 and has only been run on Linux (Mesa, AMD).
 
 ## First boot (`src/main.cpp`, `tos_boot`)
 
@@ -46,7 +48,13 @@ Four bugs stood between the first draw and the first correct picture; none was v
 | viewport width 0 | `fsubs` rounded its operands to single before subtracting; the int-to-float trick (`2^52 + n - 2^52`) gave 0 | single-precision ops compute in double, then round |
 | second element of `psq_st` lost | paired stores advanced the address, but the write-gather pipe is a single address | `psq_next_addr` |
 
-Result: with `TOS_SCREENSHOT_DIR` set, `tos_boot` saves presented frames. About 58 frames per second are presented, with no unknown command in the stream. The frames show an animated element drawn by the game itself (a bar that fills over time, drawn twice), on black. The title screen has not been reached; the game is waiting in its loading loop. The picture is a game asset, so no screenshot is kept in the repository.
+Result: with `TOS_SCREENSHOT_DIR` set, `tos_boot` saves presented frames; `TOS_SCRIPT="150:U,175:A"` scripts controller input (a frame number and a button, held five frames). About 58 frames per second are presented, with no unknown command in the stream.
+
+What the game shows, in order, on black: an animated bar (a loading indicator), then its own dialog **"Aucune carte mémoire détectée. Tales of Symphonia nécessite 1 fichier et 3 blocs pour être sauvegardé. Continuer sans sauvegarder / Réessayer"**, with the font drawn from palette textures. Pressing a button through the PAD replacement moves the game to the next screen ("Insérez carte mémoire." with a "Retour" prompt), so input works end to end. After Up then A the game stops presenting frames (178 in total): backtraces show it in functions at `0x8016xxxx`-`0x8017xxxx`, polling `DVDGetDriveStatus` tens of millions of times and printing through an `OSReport`-like function. The `ADXGCSDK` string in the DOL makes the CRI ADX audio library the likely owner of that code (inference, not checked). The Namco logo has not been reached.
+
+Known defect: the dialog is drawn twice, mirrored about the screen center, and smaller than the clip coordinates suggest. The cause is not found. The pictures are game assets, so none is kept in the repository.
+
+Further bugs found on the way: a missing function entry for every address reached only through a function pointer (`symbols/GQSF.extra_funcs.txt`, found by running the game and adding each "unresolved call"), and `PADInit`/`PADRead` being unnamed (named by hand).
 
 Not reached: the Namco logo and the title screen. No sound. The first milestone of Q40 (M2) is **not** met.
 

@@ -117,6 +117,13 @@ int main(int argc, char** argv) {
       last_dispatch(&addr, &lr);
       std::fprintf(stderr, "[watchdog] stopping after %d s; last dispatch 0x%08X from 0x%08X, r1=0x%08X lr=0x%08X\n",
                    seconds, addr, lr, g_ctx.r[1], g_ctx.lr);
+      {
+        // The game formats its error messages into a 128-byte buffer at 0x80365270.
+        char text[129] = {};
+        for (int i = 0; i < 128; ++i) text[i] = char(g_mem.read8(0x80365270 + i));
+        std::fprintf(stderr, "[boot] last message buffer: \"%s\"\n", text);
+      }
+      hle_dump(30);
       const gp::Stats& st = gp::stats();
       std::fprintf(stderr, "[gp] %llu frames, %llu commands, %llu draws, %llu vertices, %llu BP / %llu XF / %llu CP writes, %llu unknown\n",
                    (unsigned long long)gp::frames_presented(), (unsigned long long)st.commands, (unsigned long long)st.draws,
