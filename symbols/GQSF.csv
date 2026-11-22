@@ -84,6 +84,7 @@
 0x800FE094,__OSInitSystemCall
 0x800FE0FC,__OSThreadInit
 0x800FE270,OSDisableScheduler
+0x800FE2B0,OSEnableScheduler
 0x800FE2F0,UnsetRun
 0x800FE358,__OSGetEffectivePriority
 0x800FE394,SetEffectivePriority

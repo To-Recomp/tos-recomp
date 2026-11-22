@@ -14,3 +14,4 @@
 0x80111B74,CARDDelete  # identified from callees by the gcrecomp#2/#3 agents; not verified against a reference map
 0x800FB230,OSDisableInterrupts  # mfmsr/mtmsr; found by the DspDevice agent (recompiled with no-op mfmsr/mtmsr they return 0)
 0x800FB244,OSEnableInterrupts  # same
+0x800FE2B0,OSEnableScheduler  # counterpart of OSDisableScheduler (0x800FE270, HLE); left recompiled it desynchronised the scheduler counter (gcrecomp PR #25)

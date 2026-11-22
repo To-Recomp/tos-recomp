@@ -66,7 +66,13 @@ After the first two fixes the game loads all the character data (`regal*.bin`, `
 
 Further bugs found on the way: a missing function entry for every address reached only through a function pointer (`symbols/GQSF.extra_funcs.txt`, found by running the game and adding each "unresolved call"), and `PADInit`/`PADRead` being unnamed (named by hand).
 
-Not reached: the Namco logo and the title screen. No sound. The first milestone of Q40 (M2) is **not** met.
+### After the DSP: the ADX threads (fixed in gcrecomp)
+
+With a DSP device (mailboxes, ROM handshake, interrupt) and an AX command-list HLE, the game reached `BTL/BTLvoice.afs` and looped waiting for its partition to load. The cause was the scheduler: the CRI ADX library does its DVD reads from its own guest threads (one wakes up each retrace, then wakes the file-system thread), and they never ran because (1) `OSEnableScheduler` (`0x800FE2B0`) was unnamed while `OSDisableScheduler` was replaced, so the scheduler stayed disabled, and (2) a sleeping thread only ran at a switch point, which the main thread, spinning on `DVDGetDriveStatus`, never reached. `sched::poll()` now stands in for the decrementer and retrace interrupts.
+
+Result (checked on Linux, screenshots compared with Dolphin on the same disc): after "Continuer sans sauvegarder" the game shows **LICENSED BY NINTENDO**, **namco Produced by NAMCO**, **NAMCO TALES STUDIO LTD.**, then starts the intro movie, which is garbled. Then it opens `map/tit_t00.bin`, `lloyd_ex.bin`, `title.tpl`. About 1 800 frames in 45 s, 0 unknown GP commands. The Namco logo of M2 is reached; the title screen and sound (the AX voice path is unit-tested only) are not.
+
+Still missing: a real VI retrace interrupt and decrementer time slicing, the intro movie (garbled), the title screen.
 
 ## SDK identification (decided: identify by signature)
 
