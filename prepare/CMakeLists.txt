@@ -1,0 +1,52 @@
+cmake_minimum_required(VERSION 3.20)
+project(tos_prepare LANGUAGES CXX)
+
+# tos-prepare: one command from the player's two disc images to a game instance (docs/PREPARE.md).
+# A single C++17 program that reuses To-Recomp/common (disc reading, verification, extraction), so the
+# player needs no runtime besides the program itself and a C++ compiler.
+#
+#   cmake -S prepare -B build-prepare -G Ninja [-DTOS_COMMON_DIR=../common]
+#   cmake --build build-prepare && ctest --test-dir build-prepare
+
+set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+set(CMAKE_CXX_EXTENSIONS OFF)
+if(NOT CMAKE_BUILD_TYPE AND NOT CMAKE_CONFIGURATION_TYPES)
+  set(CMAKE_BUILD_TYPE Release)
+endif()
+
+# The common checkout: a sibling of this repository, like gcrecomp (see ../CMakeLists.txt).
+set(TOS_COMMON_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../../common" CACHE PATH "Path to the To-Recomp/common checkout")
+if(NOT EXISTS "${TOS_COMMON_DIR}/CMakeLists.txt")
+  message(FATAL_ERROR "common not found at ${TOS_COMMON_DIR}: set -DTOS_COMMON_DIR=<path to To-Recomp/common>")
+endif()
+set(_tos_testing "${BUILD_TESTING}")
+set(BUILD_TESTING OFF)
+add_subdirectory("${TOS_COMMON_DIR}" common EXCLUDE_FROM_ALL)
+set(BUILD_TESTING "${_tos_testing}")
+
+set(TOS_PREPARE_VERSION "0.1.0" CACHE STRING "Version printed by tos-prepare --version")
+
+add_library(tos_prepare_core STATIC
+  src/common.cpp src/json.cpp src/reporter.cpp src/process.cpp src/pipeline.cpp src/toolkit.cpp src/stages.cpp)
+target_include_directories(tos_prepare_core PUBLIC src)
+target_link_libraries(tos_prepare_core PUBLIC torecomp_common)
+target_compile_definitions(tos_prepare_core PUBLIC TOS_PREPARE_VERSION="${TOS_PREPARE_VERSION}")
+target_compile_options(tos_prepare_core PRIVATE -Wall -Wextra)
+find_package(Threads REQUIRED)
+target_link_libraries(tos_prepare_core PUBLIC Threads::Threads)
+
+add_executable(tos-prepare src/main.cpp)
+target_link_libraries(tos-prepare PRIVATE tos_prepare_core)
+
+include(CTest)
+if(BUILD_TESTING)
+  add_executable(tos_prepare_tests tests/test_main.cpp)
+  target_link_libraries(tos_prepare_tests PRIVATE tos_prepare_core)
+  target_compile_definitions(tos_prepare_tests PRIVATE TOS_PREPARE_BIN="$<TARGET_FILE:tos-prepare>"
+                             TOS_PREPARE_STUBS="${CMAKE_CURRENT_SOURCE_DIR}/tests/stubs")
+  add_dependencies(tos_prepare_tests tos-prepare)
+  add_test(NAME tos_prepare_tests COMMAND tos_prepare_tests)
+endif()
+
+install(TARGETS tos-prepare RUNTIME DESTINATION bin)

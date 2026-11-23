@@ -1,6 +1,9 @@
 #!/usr/bin/env bash
 # Rebuild the recompiler, regenerate the C++ from main.dol, and rebuild the boot harness.
 #
+# This is the DEVELOPER shortcut (repo-local extracted/, generated/ and build/, incremental with ninja).
+# Players use `tos-prepare` (docs/PREPARE.md): discs in, instance folder out, same recompiler arguments.
+#
 # Layout assumed (the workspace used by the project): this repository, gcrecomp and common are
 # sibling directories. main.dol must already be extracted to extracted/disc1/sys/main.dol
 # (see docs/DEVELOPING.md).
