@@ -33,7 +33,7 @@ tos-recomp/scripts/regen.sh      # recompiler -> generated C++ (66 MB, not commi
 tos-recomp/scripts/run.sh 30     # 30 seconds, opens a window
 ```
 
-`regen.sh` takes about a minute on 16 cores. A window opens on your desktop.
+`regen.sh` takes about a minute on 16 cores. It is the developer shortcut; the player's path is `tos-prepare` (`docs/PREPARE.md`: two discs in, a self-contained instance folder out, with progress lines, resume and cancellation). A window opens on your desktop.
 
 ## 3. Symbols
 
