@@ -18,9 +18,16 @@ cmake -S "$gcrecomp" -B "$gcrecomp/build" -G Ninja -DCMAKE_BUILD_TYPE=Release \
 cmake --build "$gcrecomp/build" --target gcrecomp_recompiler
 
 rm -rf "$out"
+# The game loads relocatable modules (FR_m_Top2Btl.rel: the battle code; FR_m_Top2field.rel) from the disc
+# root; they are recompiled in the same run as the DOL (the .so files are data, not modules).
+rel_args=()
+for rel in "$here"/extracted/disc1/files/*.rel; do
+  [ -f "$rel" ] && rel_args+=(--rel "$rel")
+done
 "$gcrecomp/build/gcrecomp_recompiler" "$dol" \
   --csv "$here/symbols/GQSF.csv" \
   --extra-funcs "$here/symbols/GQSF.extra_funcs.txt" \
+  "${rel_args[@]}" \
   --output "$out" --project tos
 
 cmake -S "$here" -B "$here/build" -G Ninja -DGCRECOMP_DIR="$gcrecomp"
