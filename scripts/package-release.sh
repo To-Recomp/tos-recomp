@@ -40,10 +40,13 @@ mkdir -p "$out" "$build"; out="$(cd "$out" && pwd)"
 
 # tos-prepare
 portable_args=()
-[ "$portable" = 1 ] && portable_args=(-DCMAKE_FIND_LIBRARY_SUFFIXES=.a -DCMAKE_EXE_LINKER_FLAGS="-static-libstdc++ -static-libgcc")
+[ "$portable" = 1 ] && portable_args=(-DTOS_PREPARE_STATIC_CODECS=ON -DCMAKE_EXE_LINKER_FLAGS="-static-libstdc++ -static-libgcc")
 cmake -S "$here/prepare" -B "$build/prepare" -G Ninja -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=OFF \
   -DTOS_COMMON_DIR="$common" -DTOS_PREPARE_VERSION="$version" "${portable_args[@]}" >/dev/null
 cmake --build "$build/prepare" -j "$jobs" --target tos-prepare
+if [ "$portable" = 1 ] && ldd "$build/prepare/tos-prepare" | grep -E 'libz|libbz2|liblzma|libzstd|libstdc'; then
+  echo "tos-prepare still depends on a codec or the C++ runtime (--portable)" >&2; exit 1
+fi
 
 name="tos-recomp-$version-linux-x86_64"
 stage="$build/stage/$name"

@@ -54,11 +54,11 @@ jobs:
           d="$(mktemp -d)" && tar -xzf ./*.tar.gz -C "$d" && p="$(echo "$d"/*)"
           "$p/tos-prepare" --version
           # The disc codecs and the C++ runtime must be inside: a distribution may name those libraries differently.
-          ! ldd "$p/tos-prepare" | grep -E 'libz|libbz2|liblzma|libzstd|libstdc'
+          if ldd "$p/tos-prepare" | grep -E 'libz|libbz2|liblzma|libzstd|libstdc'; then echo "tos-prepare is not self-contained"; exit 1; fi
           python3 -c "import json,sys;m=json.load(open(sys.argv[1]));assert m['start']['program'] and m['prepare']" "$p/recomplauncher.json"
           test -x "$p/tos-start" && test -x "$p/toolkit/bin/gcrecomp_recompiler"
           # Nothing derived from a game may be in the archive.
-          ! tar -tzf ./*.tar.gz | grep -Ei '\.(iso|dol|rel|gcm|rvz)$|generated|extracted'
+          if tar -tzf ./*.tar.gz | grep -Ei '\.(iso|dol|rel|gcm|rvz)$|generated|extracted'; then echo "game-derived file in the archive"; exit 1; fi
 
       - uses: actions/upload-artifact@v4
         with:
