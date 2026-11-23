@@ -36,7 +36,7 @@ jobs:
       - name: Install build dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y ninja-build libx11-dev libxext-dev libasound2-dev libgl-dev
+          sudo apt-get install -y ninja-build libx11-dev libxext-dev libasound2-dev libgl-dev zlib1g-dev libbz2-dev liblzma-dev libzstd-dev
 
       - name: Version
         id: version
@@ -45,7 +45,7 @@ jobs:
           echo "version=$v" >> "$GITHUB_OUTPUT"
 
       - name: Build the archive
-        run: tos-recomp/scripts/package-release.sh --version "${{ steps.version.outputs.version }}" --out "$PWD/dist" --jobs 4 --fetch-sdl3 --static-libstdcxx
+        run: tos-recomp/scripts/package-release.sh --version "${{ steps.version.outputs.version }}" --out "$PWD/dist" --jobs 4 --fetch-sdl3 --portable
 
       - name: Check the archive
         run: |
@@ -53,6 +53,8 @@ jobs:
           tar -tzf ./*.tar.gz | sed 's/^/  /'
           d="$(mktemp -d)" && tar -xzf ./*.tar.gz -C "$d" && p="$(echo "$d"/*)"
           "$p/tos-prepare" --version
+          # The disc codecs and the C++ runtime must be inside: a distribution may name those libraries differently.
+          ! ldd "$p/tos-prepare" | grep -E 'libz|libbz2|liblzma|libzstd|libstdc'
           python3 -c "import json,sys;m=json.load(open(sys.argv[1]));assert m['start']['program'] and m['prepare']" "$p/recomplauncher.json"
           test -x "$p/tos-start" && test -x "$p/toolkit/bin/gcrecomp_recompiler"
           # Nothing derived from a game may be in the archive.
