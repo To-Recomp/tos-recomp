@@ -1,0 +1,29 @@
+{
+  "format": 1,
+  "repo": "To-Recomp/tos-recomp",
+  "inputs": [
+    {
+      "id": "disc1",
+      "role": "disc",
+      "label": "Disc 1 of Tales of Symphonia (GameCube, PAL French, GQSF), as an image of your own disc.",
+      "formats": [{ "type": "file", "extensions": ["iso", "gcm", "ciso", "gcz", "rvz", "wia"] }]
+    },
+    {
+      "id": "disc2",
+      "role": "disc",
+      "label": "Disc 2 of Tales of Symphonia (GameCube, PAL French, GQSF), as an image of your own disc.",
+      "formats": [{ "type": "file", "extensions": ["iso", "gcm", "ciso", "gcz", "rvz", "wia"] }]
+    }
+  ],
+  "prepare": {
+    "program": ["tos-prepare"],
+    "args": ["{input:disc1}", "{input:disc2}", "--data", "{data}", "--resume"],
+    "label": "Checking the discs and building the game on this computer (needs a C++ compiler and SDL3 development files)",
+    "done": ["{data}/bin/tos_boot"],
+    "keeps_copy": true
+  },
+  "start": {
+    "program": ["tos-start"]
+  },
+  "saves": ["{data}/saves"]
+}

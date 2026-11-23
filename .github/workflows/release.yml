@@ -1,0 +1,83 @@
+name: Release
+
+# Pushing a tag vX.Y.Z (or vX.Y.Z-rc.N, published as a pre-release) builds the archive the To-Recomp launcher
+# installs and publishes it. A pull request that touches the packaging builds it without publishing.
+on:
+  push:
+    tags: ["v*"]
+  pull_request:
+    paths:
+      - ".github/workflows/release.yml"
+      - "packaging/**"
+      - "scripts/package-release.sh"
+      - "scripts/make-toolkit.sh"
+      - "prepare/**"
+
+permissions:
+  contents: read
+
+jobs:
+  linux:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: tos-recomp
+          fetch-depth: 0
+      - uses: actions/checkout@v4
+        with:
+          repository: To-Recomp/common
+          path: common
+      - uses: actions/checkout@v4
+        with:
+          repository: To-Recomp/gcrecomp
+          path: gcrecomp
+
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ninja-build libx11-dev libxext-dev libasound2-dev libgl-dev
+
+      - name: Version
+        id: version
+        run: |
+          if [ "$GITHUB_REF_TYPE" = tag ]; then v="${GITHUB_REF_NAME#v}"; else v="0.0.0-ci.${GITHUB_SHA::7}"; fi
+          echo "version=$v" >> "$GITHUB_OUTPUT"
+
+      - name: Build the archive
+        run: tos-recomp/scripts/package-release.sh --version "${{ steps.version.outputs.version }}" --out "$PWD/dist" --jobs 4 --fetch-sdl3 --static-libstdcxx
+
+      - name: Check the archive
+        run: |
+          cd dist && sha256sum -c SHA256SUMS
+          tar -tzf ./*.tar.gz | sed 's/^/  /'
+          d="$(mktemp -d)" && tar -xzf ./*.tar.gz -C "$d" && p="$(echo "$d"/*)"
+          "$p/tos-prepare" --version
+          python3 -c "import json,sys;m=json.load(open(sys.argv[1]));assert m['start']['program'] and m['prepare']" "$p/recomplauncher.json"
+          test -x "$p/tos-start" && test -x "$p/toolkit/bin/gcrecomp_recompiler"
+          # Nothing derived from a game may be in the archive.
+          ! tar -tzf ./*.tar.gz | grep -Ei '\.(iso|dol|rel|gcm|rvz)$|generated|extracted'
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: tos-recomp-linux
+          path: dist/*
+
+  publish:
+    if: github.ref_type == 'tag'
+    needs: linux
+    runs-on: ubuntu-22.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: tos-recomp-linux
+          path: dist
+      - name: Publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          flags=(--verify-tag --generate-notes)
+          case "$GITHUB_REF_NAME" in *-*) flags+=(--prerelease) ;; esac
+          gh release create "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --title "tos-recomp $GITHUB_REF_NAME" "${flags[@]}" dist/*
