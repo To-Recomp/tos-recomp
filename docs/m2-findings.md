@@ -85,7 +85,20 @@ Four more root causes, none visible from where the symptom was:
 
 Result (screenshots on Linux, compared with Dolphin): after the card dialog, **LICENSED BY NINTENDO**, namco logo, **NAMCO TALES STUDIO LTD.**, the intro movie (HVQM4, played by the game's own code), then the **title screen** with the logo and the menu "Nouvelle partie / Charger partie / Configurer"; the demo movie restarts after idle. The music is audible; the title BGM has a silent right channel (the game's buffers already hold zeros), unexplained. M2 (Namco logo and title screen) is met.
 
-Not done: driving the menu into the game, the right audio channel, other scenes (culling checked only on the title scene), the D3D11 backend (not checked for the same inversion), the title menu text looks thin.
+### From the title to the first battles
+
+Played by hand (`scripts/play.sh`) by the owner and replayed by script (`gcrecomp/tools/run-scripted.sh`), checked on screenshots:
+
+| Symptom | Cause | Fix |
+| --- | --- | --- |
+| right audio channel silent, movie mono | `OSGetSoundMode` read mono (SRAM all zero because `OSInit` is HLE); the AX HLE used the later microcode's mixer-control meaning, but the game uploads the first GameCube AX (crc `4E8A8B21`) | stereo default, AX conversion selected by the microcode crc (#37) |
+| permanent black field scene after "Nouvelle partie" | `DVDReadAsyncPrio` ran its callback inside the call; the loader sets "loading" after it returns and overwrote "loaded" | callbacks deferred (#38) |
+| hang after the first save, hang at battle start | tiny completion callbacks reached through pointers (`0x8000AC08`, `0x8000AC14`, `0x80080320`, ...) not discovered statically | listed by hand, then pointer discovery in the recompiler (#45) |
+| first battle: unresolved call into the heap | the battle code is not in `main.dol`: `FR_m_Top2Btl.rel` (and `FR_m_Top2field.rel`) are relocatable modules loaded and linked at run time | REL modules recompiled as position-independent code with a run-time registry (#46) |
+| 15-37 fps in battle | two 512x512 C4 textures decoded 5-6 times per frame (palette conversion per texel) | palette-table decoder (#48); battles hold 59.6 fps |
+| `VIConfigure(): Tried to change mode ... forbidden` | `OSTVFormat` was never written, so `VIInit` took the VI for a cold start | the console video standard and a configured VI at boot (#49) |
+
+Result: the first two battles, the Iselia field, the menu and the save screen work (the card image validated by `tools/card-check.py`: two saves). The owner played them with no display problem and found the speed right. Not done: disc 2, the other REL-using scenes (only the Iselia battle module was exercised), the D3D11 backend, the VI clock for PAL (50 Hz mode, 59.94 Hz clock), the song's right channel on other tracks.
 
 ## SDK identification (decided: identify by signature)
 
