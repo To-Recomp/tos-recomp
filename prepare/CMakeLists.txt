@@ -22,7 +22,17 @@ if(NOT EXISTS "${TOS_COMMON_DIR}/CMakeLists.txt")
 endif()
 set(_tos_testing "${BUILD_TESTING}")
 set(BUILD_TESTING OFF)
+# Release builds carry the disc codecs (zlib, bzip2, lzma, zstd): their sonames differ between distributions
+# (libbz2.so.1.0 on Debian, libbz2.so.1 on Fedora). Looking for static libraries only, after project().
+option(TOS_PREPARE_STATIC_CODECS "Link zlib, bzip2, lzma and zstd statically" OFF)
+if(TOS_PREPARE_STATIC_CODECS)
+  set(_tos_suffixes "${CMAKE_FIND_LIBRARY_SUFFIXES}")
+  set(CMAKE_FIND_LIBRARY_SUFFIXES .a)
+endif()
 add_subdirectory("${TOS_COMMON_DIR}" common EXCLUDE_FROM_ALL)
+if(TOS_PREPARE_STATIC_CODECS)
+  set(CMAKE_FIND_LIBRARY_SUFFIXES "${_tos_suffixes}")
+endif()
 set(BUILD_TESTING "${_tos_testing}")
 
 set(TOS_PREPARE_VERSION "0.1.0" CACHE STRING "Version printed by tos-prepare --version")
