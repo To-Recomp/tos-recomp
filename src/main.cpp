@@ -68,6 +68,11 @@ int main(int argc, char** argv) {
   // derives it from the end of the DOL. The game hard-codes a heap at 0x804E4000 that must not
   // overlap the arena, so a fixed 0x80400000 plus the game's own arena allocations overlapped it.
   config.arena_lo = 0;
+  // The arena's high bound: on a console the file-system table sits at the top of RAM and the arena
+  // ends just below it, so the size of the disc's FST (boot.bin) decides it. The game builds its
+  // battle heap up to OSGetArenaHi(); the library default left it about 1 MB short and the boss
+  // battle ran out of heap. The disc's sys/ folder sits next to the files/ folder given as argv[2].
+  config.fst_max_size = gcrecomp::disc_fst_max_size((std::string(argv[2]) + "/../sys/boot.bin").c_str());
   init_low_memory(&g_mem, config);
   set_game_root(argv[2]);
 
