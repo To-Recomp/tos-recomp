@@ -1,0 +1,11 @@
+#!/bin/sh
+# Starts the game that tos-prepare built in the instance's data folder (docs/PREPARE.md, section 2).
+# The harness needs an unlimited stack and reads the memory card image from saves/.
+set -e
+data="${RECOMPLAUNCHER_DATA:?tos-start is started by the launcher (RECOMPLAUNCHER_DATA is not set)}"
+cd "$data"
+[ -x bin/tos_boot ] || { echo "tos-start: $data/bin/tos_boot is missing: build the game first (tos-prepare)" >&2; exit 1; }
+mkdir -p saves
+ulimit -s unlimited
+export GCRECOMP_CARD_IMAGE="$data/saves/card-a.raw"
+exec bin/tos_boot game/sys/main.dol game/files 86400 "$@"

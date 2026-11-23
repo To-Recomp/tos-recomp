@@ -3,28 +3,31 @@
 # the headers the generated code includes, the boot harness source, dumps.toml and the symbol files.
 # Everything in it is ours; nothing is derived from the game, so it may be shipped.
 #
-#   scripts/make-toolkit.sh --gcrecomp DIR --out DIR [--build DIR] [--jobs N] [--no-build]
+#   scripts/make-toolkit.sh --gcrecomp DIR --out DIR [--build DIR] [--jobs N] [--no-build] [--fetch-sdl3]
 #
 #   --gcrecomp DIR  a gcrecomp checkout (default: ../gcrecomp next to this repository)
 #   --out DIR       the toolkit folder to create (replaced if it exists)
 #   --build DIR     gcrecomp build folder (default: $TMPDIR/gcrecomp-toolkit-build); it is configured and
 #                   built unless --no-build is given (use that to reuse an existing build)
 #   --jobs N        build parallelism (default 4)
+#   --fetch-sdl3    build SDL3 from source for the headers the libraries are compiled against (a machine without
+#                   SDL3 development files, such as CI). The toolkit still links the player's own SDL3 (-lSDL3).
 #
 # The toolkit's libraries are compiled by the compiler CMake picks here. A player's compiler must use
 # the same C++ standard library (libstdc++ with gcc or clang on Linux), see docs/PREPARE.md.
 set -euo pipefail
 
 here="$(cd "$(dirname "$0")/.." && pwd)"
-gcrecomp="$here/../gcrecomp"; out=; build="${TMPDIR:-/var/tmp}/gcrecomp-toolkit-build"; jobs=4; do_build=1
+gcrecomp="$here/../gcrecomp"; out=; build="${TMPDIR:-/var/tmp}/gcrecomp-toolkit-build"; jobs=4; do_build=1; fetch_sdl3=OFF
 while [ $# -gt 0 ]; do
   case "$1" in
     --gcrecomp) gcrecomp="$2"; shift 2 ;;
     --out) out="$2"; shift 2 ;;
     --build) build="$2"; shift 2 ;;
     --jobs) jobs="$2"; shift 2 ;;
+    --fetch-sdl3) fetch_sdl3=ON; shift ;;
     --no-build) do_build=0; shift ;;
-    -h|--help) sed -n '2,16p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    -h|--help) sed -n '2,17p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
     *) echo "unknown option $1" >&2; exit 2 ;;
   esac
 done
@@ -34,7 +37,7 @@ gcrecomp="$(cd "$gcrecomp" && pwd)"
 
 if [ "$do_build" = 1 ]; then
   cmake -S "$gcrecomp" -B "$build" -G Ninja -DCMAKE_BUILD_TYPE=Release \
-    -DGCRECOMP_BUILD_EXAMPLE=OFF -DGCRECOMP_BUILD_TESTS=OFF -DBUILD_TESTING=OFF >/dev/null
+    -DGCRECOMP_BUILD_EXAMPLE=OFF -DGCRECOMP_BUILD_TESTS=OFF -DBUILD_TESTING=OFF -DGCRECOMP_FETCH_SDL3="$fetch_sdl3" >/dev/null
   cmake --build "$build" -j "$jobs" --target gcrecomp_recompiler gcrecomp_gp gcrecomp_runtime gcrecomp_gx gcrecomp_audio gcrecomp_input
 fi
 libs=(gcrecomp_gp gcrecomp_runtime gcrecomp_gx gcrecomp_audio gcrecomp_input)
