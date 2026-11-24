@@ -30,6 +30,14 @@ Players need nothing installed and no administrator rights; about 2.5 GB free fo
 
 What the workflow proves on a `windows-latest` runner for every build (also in pull requests): the archive unpacks; `tos-prepare.exe --version` and `--check` run; it depends on no codec or Visual C++ runtime DLL; nothing game-derived is inside; and `tests/release-smoke.sh` runs the **real** `tos-prepare.exe` from the unpacked archive on two **synthetic** disc images (`tos-synth-discs`, `prepare/tests/synth_discs.cpp`; the main.dol has four instructions): verify, extract, the real recompiler, compile of the generated code and of the real boot harness with the bundled Zig, link against the shipped libraries, then it starts the resulting game executable, which runs the synthetic program and exits. **Not proved by it**: that the real game (a 2.9 MB DOL, 1,667 files) runs on real Windows hardware (graphics, audio, input, speed, the 512 MB stack reservation being enough), the disc 2 path of the real discs, and the build time and memory on a player's machine.
 
+Unverified on Windows (nobody has run these; the first player or the owner will):
+
+- the real game from the player's discs through the launcher: the whole `tos-prepare` run on the real, 2.9 GB discs (time, memory, `--jobs` default), then play: OpenGL 3.3 window through SDL3, audio, keyboard and pads, frame rate, and whether a 512 MB stack reservation is enough for the main thread and the guest threads (Linux uses an unlimited main stack);
+- the disc 2 path on the real discs (the smoke test merges the files of a synthetic disc 2, so the merge logic runs on Windows, but not with the real 1,667 files, nor does it show that the game accepts the merged tree);
+- the launcher unpacking the zip and starting `tos-prepare.exe` and `tos-start.exe` (no change was needed or made in the launcher; whether a console window shows for these programs is unchecked);
+- paths: the longest file in the archive is 104 characters below its root, so Windows' 260-character limit is only a concern for an install folder over about 150 characters; `tos-prepare` on a data folder that deep is untested;
+- older Windows versions and Windows on ARM (x64 emulation): not tried.
+
 ## Cutting a release
 
 1. Merge what must be in it. Don't tag for docs-only changes: each release makes every player build the game again.

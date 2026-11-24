@@ -182,23 +182,48 @@ jobs:
           name: tos-recomp-windows
           path: dist/*.zip
 
-  publish:
-    if: github.ref_type == 'tag'
+  # What a release is made of, assembled on every build (pull requests too) so that the publishing step of a tag
+  # has nothing left to get wrong: one asset per platform, named as the launcher looks for them, plus SHA256SUMS.
+  assets:
     needs: [linux, windows]
     runs-on: ubuntu-22.04
-    permissions:
-      contents: write
     steps:
       - uses: actions/download-artifact@v4
         with:
           pattern: tos-recomp-*
           merge-multiple: true
           path: dist
+      - name: Assemble
+        run: |
+          cd dist
+          ls -l
+          [ "$(ls tos-recomp-*-linux-x86_64.tar.gz | wc -l)" = 1 ] || { echo "expected exactly one Linux archive"; exit 1; }
+          [ "$(ls tos-recomp-*-windows-x86_64.zip | wc -l)" = 1 ] || { echo "expected exactly one Windows archive"; exit 1; }
+          [ "$(ls | wc -l)" = 2 ] || { echo "unexpected files in the release"; exit 1; }
+          sha256sum tos-recomp-* > SHA256SUMS
+          cat SHA256SUMS
+          sha256sum -c SHA256SUMS
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-assets
+          path: dist/*
+          retention-days: 7
+
+  publish:
+    if: github.ref_type == 'tag'
+    needs: assets
+    runs-on: ubuntu-22.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: release-assets
+          path: dist
       - name: Publish
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          ( cd dist && sha256sum tos-recomp-* > SHA256SUMS && cat SHA256SUMS )
           flags=(--verify-tag --generate-notes)
           case "$GITHUB_REF_NAME" in *-*) flags+=(--prerelease) ;; esac
           gh release create "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --title "tos-recomp $GITHUB_REF_NAME" "${flags[@]}" dist/*

@@ -75,6 +75,19 @@ cat "$work/game.out"
 [ "$code" = 0 ] || fail "the game executable exited with $code"
 grep -q 'entry point returned' "$work/game.out" || fail "the game did not reach the end of the synthetic program"
 
+start="$release/tos-start$exe"
+if [ -f "$start" ]; then
+  step "tos-start starts the game the way the launcher does (RECOMPLAUNCHER_DATA)"
+  set +e
+  RECOMPLAUNCHER_DATA="$(native "$work/data")" timeout 120 "${runner[@]}" "$start" >"$work/start.out" 2>&1
+  code=$?
+  set -e
+  cat "$work/start.out"
+  [ "$code" = 0 ] || fail "tos-start exited with $code"
+  grep -q 'entry point returned' "$work/start.out" || fail "tos-start did not run the game to the end of the synthetic program"
+  [ -d "$work/data/saves" ] || fail "tos-start did not create saves/"
+fi
+
 step "tos-prepare --resume skips everything"
 "${runner[@]}" "$prepare" --data "$(native "$work/data")" --resume --dumps "$(native "$work/discs/dumps.toml")" --symbols "$(native "$work/discs/symbols")" \
   | tee "$work/resume.out"
