@@ -6,6 +6,10 @@ Static recompilation of Tales of Symphonia (GameCube, 2003), the pilot project. 
 
 Status: M0, repository skeleton only.
 
+## Platforms
+
+Releases (`docs/RELEASING.md`) are archives for the [To-Recomp launcher](https://github.com/To-Recomp/launcher), for **Linux x86_64** (needs a C++ compiler and the SDL3 development files) and **Windows x86_64** (nothing to install: the archive carries its own compiler, Zig). The player's own discs are turned into the game on the player's machine by `tos-prepare` (`docs/PREPARE.md`). The Windows build is proved by CI on a Windows runner up to a synthetic game that links and runs; the real game has not been run on real Windows hardware yet.
+
 Not affiliated with or endorsed by Bandai Namco Entertainment, Sony Interactive Entertainment, Nintendo or any game publisher or developer. This project contains no game files; you bring your own copy of the game.
 
 ## AI assistance

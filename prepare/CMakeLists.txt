@@ -62,6 +62,11 @@ target_link_libraries(tos_prepare_core PUBLIC Threads::Threads)
 add_executable(tos-prepare src/main.cpp)
 target_link_libraries(tos-prepare PRIVATE tos_prepare_core)
 
+# Synthetic discs for the release smoke test (tests/release-smoke.sh): no game data. Built on request:
+#   cmake --build build-prepare --target tos-synth-discs
+add_executable(tos-synth-discs EXCLUDE_FROM_ALL tests/synth_discs.cpp)
+target_link_libraries(tos-synth-discs PRIVATE tos_prepare_core)
+
 include(CTest)
 if(BUILD_TESTING)
   # Stand-ins for the recompiler, the C++ compiler and a child process (tests/stubs/fake_tool.cpp): portable programs,

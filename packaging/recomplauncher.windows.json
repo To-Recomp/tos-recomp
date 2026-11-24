@@ -1,0 +1,29 @@
+{
+  "format": 1,
+  "repo": "To-Recomp/tos-recomp",
+  "inputs": [
+    {
+      "id": "disc1",
+      "role": "disc",
+      "label": "Disc 1",
+      "formats": [{ "type": "file", "extensions": ["iso", "gcm", "ciso", "gcz", "rvz", "wia"] }]
+    },
+    {
+      "id": "disc2",
+      "role": "disc",
+      "label": "Disc 2",
+      "formats": [{ "type": "file", "extensions": ["iso", "gcm", "ciso", "gcz", "rvz", "wia"] }]
+    }
+  ],
+  "prepare": {
+    "program": ["tos-prepare.exe"],
+    "args": ["{input:disc1}", "{input:disc2}", "--data", "{data}", "--resume"],
+    "label": "Checking the discs and building the game on this computer (takes a while; nothing to install)",
+    "done": ["{data}/bin/tos_boot.exe"],
+    "keeps_copy": true
+  },
+  "start": {
+    "program": ["tos-start.exe"]
+  },
+  "saves": ["{data}/saves"]
+}
