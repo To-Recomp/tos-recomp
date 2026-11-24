@@ -5,8 +5,10 @@
 #               "Compatible": same game data, but the image bytes differ (scrubbed, rebuilt).
 #               Regenerate with `torecomp-disc manifest <disc.iso>`.
 #
-# The content_sha1 values below were generated from scrubbed images (padding zeroed) whose
-# SHA-1 does not match Redump. They have not been cross-checked against a Redump-verified image.
+# The content_sha1 values below were computed from Redump-verified images (whole-image SHA-1 equal to the
+# `sha1` of the entry) with `torecomp-disc manifest`. They replace values taken from an older dump whose
+# SHA-1 does not match Redump: 14 of its big files (BTL/btlvoice.afs, three BTL/v_*.snd, the eight
+# EV/sce_*.afs, MOV/op.h4m, MOV/s01.h4m) differ from the verified image, so that dump is not the retail data.
 
 format = 1
 
@@ -26,7 +28,7 @@ size = 1459978240
 title = "Tales of Symphonia (France) (Disc 1)"
 redump_id = 6511
 sha1 = "d38365eb13f09f185b058826ec3f45e6e1118e66"
-content_sha1 = "db819db00443ba2c6484e81f613b5c5bdfe66180"
+content_sha1 = "6b3a61249783be93ae1880fc90eb36dd0cd8f079"
 
 [[release.disc]]
 game_id = "GQSF"
@@ -36,4 +38,4 @@ size = 1459978240
 title = "Tales of Symphonia (France) (Disc 2)"
 redump_id = 6512
 sha1 = "d66b673c9979be546c2253b5de96337981273335"
-content_sha1 = "6b0b1d25532af9a17b1171cb2f9b689b50148ec2"
+content_sha1 = "a3c22ec688780cf92162953623358f18b9f515c1"
