@@ -1,7 +1,8 @@
 name: Release
 
-# Pushing a tag vX.Y.Z (or vX.Y.Z-rc.N, published as a pre-release) builds the archive the To-Recomp launcher
-# installs and publishes it. A pull request that touches the packaging builds it without publishing.
+# Pushing a tag vX.Y.Z (or vX.Y.Z-rc.N, published as a pre-release) builds the archives the To-Recomp launcher
+# installs (Linux .tar.gz and Windows .zip) and publishes both in one release. A pull request that touches the
+# packaging builds them without publishing.
 on:
   push:
     tags: ["v*"]
@@ -11,7 +12,9 @@ on:
       - "packaging/**"
       - "scripts/package-release.sh"
       - "scripts/make-toolkit.sh"
+      - "scripts/fetch-zig.sh"
       - "prepare/**"
+      - "tests/**"
 
 permissions:
   contents: read
@@ -63,23 +66,134 @@ jobs:
       - uses: actions/upload-artifact@v4
         with:
           name: tos-recomp-linux
-          path: dist/*
+          path: dist/*.tar.gz
+
+  windows:
+    runs-on: windows-latest
+    defaults:
+      run:
+        shell: bash
+    env:
+      PYTHON: python
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: tos-recomp
+          fetch-depth: 0
+      - uses: actions/checkout@v4
+        with:
+          repository: To-Recomp/common
+          path: common
+      - uses: actions/checkout@v4
+        with:
+          repository: To-Recomp/gcrecomp
+          path: gcrecomp
+
+      - name: Version
+        id: version
+        run: |
+          if [ "$GITHUB_REF_TYPE" = tag ]; then v="${GITHUB_REF_NAME#v}"; else v="0.0.0-ci.${GITHUB_SHA::7}"; fi
+          echo "version=$v" >> "$GITHUB_OUTPUT"
+
+      - name: Ninja
+        shell: pwsh
+        run: |
+          if (-not (Get-Command ninja -ErrorAction SilentlyContinue)) { choco install ninja -y --no-progress; if ($LASTEXITCODE -ne 0) { exit 1 } }
+          ninja --version
+
+      # tos-prepare.exe: MSVC, static runtime, the disc codecs (zlib, bzip2, liblzma, zstd) linked in from vcpkg,
+      # so the player needs nothing installed.
+      - name: Disc codecs (static, from vcpkg)
+        shell: pwsh
+        run: |
+          & "$env:VCPKG_INSTALLATION_ROOT\vcpkg.exe" install zlib bzip2 liblzma zstd --triplet x64-windows-static
+          if ($LASTEXITCODE -ne 0) { exit 1 }
+      - name: Build tos-prepare.exe and the synthetic disc tool (MSVC)
+        shell: pwsh
+        run: |
+          cmake -S tos-recomp/prepare -B build-prepare -A x64 -DBUILD_TESTING=OFF -DTOS_COMMON_DIR="$PWD/common" `
+            -DTOS_PREPARE_VERSION="${{ steps.version.outputs.version }}" `
+            -DCMAKE_TOOLCHAIN_FILE="$env:VCPKG_INSTALLATION_ROOT/scripts/buildsystems/vcpkg.cmake" `
+            -DVCPKG_TARGET_TRIPLET=x64-windows-static -DCMAKE_MSVC_RUNTIME_LIBRARY=MultiThreaded `
+            -DTOS_PREPARE_STATIC_CODECS=ON
+          if ($LASTEXITCODE -ne 0) { exit 1 }
+          cmake --build build-prepare --config Release --parallel --target tos-prepare tos-synth-discs
+          if ($LASTEXITCODE -ne 0) { exit 1 }
+      - name: Licences of the codecs
+        run: |
+          mkdir -p codec-licenses
+          for port in zlib bzip2 liblzma zstd; do
+            cp "$VCPKG_INSTALLATION_ROOT/installed/x64-windows-static/share/$port/copyright" "codec-licenses/$port-copyright.txt"
+          done
+
+      # The pinned Zig (packaging/windows/zig.pin): bundled in the archive, and the compiler that builds the
+      # runtime libraries, SDL3 and the recompiler it contains.
+      - name: Zig
+        run: tos-recomp/scripts/fetch-zig.sh --host x86_64-windows --out "$RUNNER_TEMP/zig" --check-index
+
+      - name: Build the archive
+        run: |
+          zdir="$(ls -d "$RUNNER_TEMP"/zig/zig-x86_64-windows-*/)"
+          tos-recomp/scripts/package-release.sh --platform windows --version "${{ steps.version.outputs.version }}" \
+            --out "$PWD/dist" --jobs 4 --zig-dist "$zdir" --prepare-exe build-prepare/Release/tos-prepare.exe \
+            --licenses codec-licenses
+
+      - name: Check the archive
+        run: |
+          cd dist && sha256sum -c SHA256SUMS
+          ls -l ./*.zip
+          rm -rf "$RUNNER_TEMP/unpacked" && mkdir "$RUNNER_TEMP/unpacked"
+          python -c "import sys,zipfile;z=zipfile.ZipFile(sys.argv[1]);print(len(z.namelist()),'entries');z.extractall(sys.argv[2])" ./*.zip "$RUNNER_TEMP/unpacked"
+          p="$(echo "$RUNNER_TEMP"/unpacked/*)"
+          ls "$p" "$p/toolkit" "$p/toolkit/lib" "$p/toolchain/zig" "$p/licenses"
+          "$p/tos-prepare.exe" --version
+          d="$(mktemp -d)"
+          # No toolkit problem, no disc: the instance is simply not prepared yet (exit 10), not an error.
+          "$p/tos-prepare.exe" --data "$(cygpath -m "$d")" --check || test $? = 10
+          python -c "import json,sys;m=json.load(open(sys.argv[1]));assert m['start']['program']==['tos-start.exe'] and m['prepare']['program']==['tos-prepare.exe'] and m['prepare']['done']==['{data}/bin/tos_boot.exe']" "$p/recomplauncher.json"
+          test -f "$p/tos-start.exe" && test -f "$p/toolkit/bin/gcrecomp_recompiler.exe" && test -f "$p/toolchain/zig/zig.exe" && test -f "$p/toolchain/zig/LICENSE"
+          test -f "$p/LICENSE" && test -f "$p/THIRD-PARTY-NOTICES.txt" && test -f "$p/licenses/SDL3-LICENSE.txt" && test -f "$p/licenses/zlib-copyright.txt"
+          # tos-prepare.exe must not need the Visual C++ runtime or any codec DLL.
+          deps="$(python - "$p/tos-prepare.exe" <<'PY'
+          import re, sys
+          data = open(sys.argv[1], "rb").read()
+          print("\n".join(sorted({m.decode().lower() for m in re.findall(rb"[A-Za-z0-9_.-]+\.dll", data)})))
+          PY
+          )"
+          echo "$deps"
+          if echo "$deps" | grep -Ei 'vcruntime|msvcp|zlib|bz2|lzma|zstd'; then echo "tos-prepare.exe is not self-contained"; exit 1; fi
+          # Nothing derived from a game may be in the archive.
+          if python -c "import sys,zipfile;print('\n'.join(zipfile.ZipFile(sys.argv[1]).namelist()))" ./*.zip | grep -Ei '\.(iso|dol|rel|gcm|rvz|gcz|ciso|wia|raw)$|/generated/|/extracted/|/game/'; then echo "game-derived file in the archive"; exit 1; fi
+
+      # Compiler, libraries, headers and recompiler of the archive working together, without a disc: the real
+      # tos-prepare.exe on two synthetic disc images (docs/RELEASING.md).
+      - name: Smoke test the unpacked archive
+        run: |
+          p="$(echo "$RUNNER_TEMP"/unpacked/*)"
+          tos-recomp/tests/release-smoke.sh --release "$p" --synth build-prepare/Release/tos-synth-discs.exe --work "$RUNNER_TEMP/smoke"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: tos-recomp-windows
+          path: dist/*.zip
 
   publish:
     if: github.ref_type == 'tag'
-    needs: linux
+    needs: [linux, windows]
     runs-on: ubuntu-22.04
     permissions:
       contents: write
     steps:
       - uses: actions/download-artifact@v4
         with:
-          name: tos-recomp-linux
+          pattern: tos-recomp-*
+          merge-multiple: true
           path: dist
       - name: Publish
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
+          ( cd dist && sha256sum tos-recomp-* > SHA256SUMS && cat SHA256SUMS )
           flags=(--verify-tag --generate-notes)
           case "$GITHUB_REF_NAME" in *-*) flags+=(--prerelease) ;; esac
           gh release create "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --title "tos-recomp $GITHUB_REF_NAME" "${flags[@]}" dist/*
