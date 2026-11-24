@@ -58,9 +58,9 @@ class VerifyStage : public Stage {
     for (const auto& d : ctx.opt.discs) {
       std::error_code ec;
       const auto size = fs::file_size(d, ec);
-      if (ec) throw Error(kBadDump, "cannot read the disc image " + d.string() + ": " + ec.message());
-      const auto mtime = fs::last_write_time(d, ec).time_since_epoch().count();
-      acc += fs::absolute(d).string() + " " + std::to_string(size) + " " + std::to_string(mtime) + "\n";
+      if (ec) throw Error(kBadDump, "cannot read the disc image " + u8(d) + ": " + ec.message());
+      const auto mtime = static_cast<long long>(fs::last_write_time(d, ec).time_since_epoch().count());
+      acc += u8(fs::absolute(d)) + " " + std::to_string(size) + " " + std::to_string(mtime) + "\n";
     }
     return sha1_text(acc);
   }
@@ -111,13 +111,13 @@ class VerifyStage : public Stage {
         if (f.id.level == torecomp::Level::Unknown) {
           std::string why = f.id.release ? "its header matches '" + f.id.release->title + "' but the game files differ from the known dump"
                                          : "it is not a known dump of " + plan_->toolkit.game_id;
-          throw Error(kBadDump, f.path.string() + " is not a recognised dump (" + why + "). whole-image SHA-1 " + f.id.sha1 +
+          throw Error(kBadDump, u8(f.path) + " is not a recognised dump (" + why + "). whole-image SHA-1 " + f.id.sha1 +
                                     (f.id.content_sha1.empty() ? "" : ", content_sha1 " + f.id.content_sha1));
         }
-        ctx.rep.log(f.path.string() + ": " + torecomp::to_string(f.id.level) + ", " + f.id.release->title + ", disc " +
+        ctx.rep.log(u8(f.path) + ": " + torecomp::to_string(f.id.level) + ", " + f.id.release->title + ", disc " +
                     std::to_string(f.id.disc->disc_number + 1) + ", " + f.format);
       } catch (const torecomp::Error& e) {
-        throw Error(kBadDump, f.path.string() + ": " + e.what());
+        throw Error(kBadDump, u8(f.path) + ": " + e.what());
       }
       found.push_back(std::move(f));
     }
@@ -147,7 +147,7 @@ class VerifyStage : public Stage {
     for (const auto& f : found) {
       Json d = Json::object();
       d["disc"] = static_cast<int>(f.id.disc->disc_number + 1);
-      d["file"] = fs::absolute(f.path).string();
+      d["file"] = u8(fs::absolute(f.path));
       d["format"] = f.format;
       d["level"] = f.id.level == torecomp::Level::RedumpVerified ? "redump-verified" : "compatible";
       d["sha1"] = f.id.sha1;
@@ -304,7 +304,7 @@ class ExtractStage : public Stage {
             }
             fs::create_directories(torecomp::hostpath::long_path(to).parent_path(), ec);
             fs::rename(torecomp::hostpath::long_path(from), torecomp::hostpath::long_path(to), ec);
-            if (ec) throw Error(kExtractFailed, "cannot move " + from.string() + ": " + ec.message());
+            if (ec) throw Error(kExtractFailed, "cannot move " + u8(from) + ": " + ec.message());
             entries.push_back({l.path, host, l.sha1, l.size, 2});
           }
         }
@@ -406,14 +406,14 @@ class RecompileStage : public Stage {
     std::error_code ec;
     fs::create_directories(out, ec);
     const fs::path game = under(ctx, layout::kGame);
-    std::vector<std::string> argv = {plan_->toolkit.recompiler.string(), (game / "sys" / "main.dol").string(),
-                                     "--csv", plan_->toolkit.symbols_csv.string(),
-                                     "--extra-funcs", plan_->toolkit.symbols_extra.string()};
+    std::vector<std::string> argv = {u8(plan_->toolkit.recompiler), u8((game / "sys" / "main.dol")),
+                                     "--csv", u8(plan_->toolkit.symbols_csv),
+                                     "--extra-funcs", u8(plan_->toolkit.symbols_extra)};
     for (const auto& r : ctx.state.at("extract").info.get("rels").items()) {
       argv.push_back("--rel");
       argv.push_back((game / "files" / r.get("name").str()).string());
     }
-    argv.insert(argv.end(), {"--output", out.string(), "--project", plan_->toolkit.project});
+    argv.insert(argv.end(), {"--output", u8(out), "--project", plan_->toolkit.project});
     ctx.rep.stage_progress(0, 1, "Translating the game code");
     ctx.rep.log("run: " + join(argv));
     const RunResult r = run_process(argv, {}, ctx.cancel, [&](const std::string& l) { ctx.rep.log("[recompiler] " + l); });
@@ -432,7 +432,7 @@ class RecompileStage : public Stage {
       const std::uint64_t size = fs::file_size(out / f);
       bytes += size;
       if (f.extension() == ".cpp") ++sources;
-      tsv << size << "\t" << sha1_file(out / f) << "\t" << f.string() << "\n";
+      tsv << size << "\t" << sha1_file(out / f) << "\t" << u8(f) << "\n";
     }
     if (sources == 0) throw Error(kRecompileFailed, "the recompiler produced no C++ files");
     write_text_atomic(out / "generated.tsv", tsv.str());
@@ -455,12 +455,12 @@ class RecompileStage : public Stage {
 // ---------------------------------------------------------------------------------------------
 // compile
 
-std::string compiler_id(const std::vector<std::string>& cxx, CancelToken& cancel) {
+std::string compiler_id(const std::vector<std::string>& cxx, const RunOptions& run, CancelToken& cancel) {
   std::string id;
   for (const char* flag : {"--version", "-dumpmachine"}) {
     std::vector<std::string> argv = cxx;
     argv.push_back(flag);
-    const RunResult r = run_process(argv, {}, cancel, nullptr);
+    const RunResult r = run_process(argv, run, cancel, nullptr);
     if (r.exit_code != 0 || r.tail.empty()) {
       throw Error(kNoToolchain, "the compiler " + cxx[0] + " does not answer " + flag + ": it is not usable");
     }
@@ -536,7 +536,7 @@ class CompileStage : public Stage {
         units.push_back({gen / file, size, sha1_text(base + sha), {}, false});
       }
       for (const auto& s : tk.sources) {
-        units.push_back({s, static_cast<std::uint64_t>(fs::file_size(s, ec)), sha1_text(base + sha1_file(s) + s.filename().string()), {}, false});
+        units.push_back({s, static_cast<std::uint64_t>(fs::file_size(s, ec)), sha1_text(base + sha1_file(s) + u8(s.filename())), {}, false});
       }
     }
     std::uint64_t total = 0;
@@ -583,19 +583,19 @@ class CompileStage : public Stage {
           std::vector<std::string> argv = plan_->compiler;
           argv.push_back("-std=" + tk.std_flag);
           for (const auto& f : tk.flags) argv.push_back(f);
-          for (const auto& d : tk.include_dirs) argv.push_back("-I" + d.string());
-          argv.push_back("-I" + gen.string());
-          argv.insert(argv.end(), {"-c", u.source.string(), "-o", tmp_obj.string()});
+          for (const auto& d : tk.include_dirs) argv.push_back("-I" + u8(d));
+          argv.push_back("-I" + u8(gen));
+          argv.insert(argv.end(), {"-c", u8(u.source), "-o", u8(tmp_obj)});
           ctx.rep.log("run: " + join(argv));
-          const RunResult r = run_process(argv, {}, ctx.cancel, [&](const std::string& l) { ctx.rep.log("[cxx " + u.source.filename().string() + "] " + l); });
+          const RunResult r = run_process(argv, plan_->compiler_run, ctx.cancel, [&](const std::string& l) { ctx.rep.log("[cxx " + u8(u.source.filename()) + "] " + l); });
           if (r.exit_code != 0) {
-            throw Error(kCompileFailed, "compiling " + u.source.filename().string() + " failed (exit " + std::to_string(r.exit_code) +
+            throw Error(kCompileFailed, "compiling " + u8(u.source.filename()) + " failed (exit " + std::to_string(r.exit_code) +
                                             "): " + join(r.tail, " | "));
           }
           std::error_code e2;
           fs::rename(tmp_obj, u.object, e2);
-          if (e2) throw Error(kFailed, "cannot store " + u.object.string() + ": " + e2.message());
-          ctx.rep.log("compiled " + u.source.filename().string() + " in " + std::to_string(r.seconds) + " s, " +
+          if (e2) throw Error(kFailed, "cannot store " + u8(u.object) + ": " + e2.message());
+          ctx.rep.log("compiled " + u8(u.source.filename()) + " in " + std::to_string(r.seconds) + " s, " +
                       std::to_string(r.max_rss_kb / 1024) + " MB peak");
           done_bytes += u.size;
           ++finished;
@@ -620,19 +620,19 @@ class CompileStage : public Stage {
     fs::create_directories(exe.parent_path(), ec);
     const fs::path tmp_exe = tmp / (tk.executable + ".new");
     std::vector<std::string> argv = plan_->compiler;
-    argv.insert(argv.end(), {"-o", tmp_exe.string()});
-    for (const auto& u : units) argv.push_back(u.object.string());
-    for (const auto& l : tk.libs) argv.push_back(l.string());
+    argv.insert(argv.end(), {"-o", u8(tmp_exe)});
+    for (const auto& u : units) argv.push_back(u8(u.object));
+    for (const auto& l : tk.libs) argv.push_back(u8(l));
     for (const auto& l : tk.system_libs) argv.push_back(l);
     ctx.rep.log("run: " + join(argv));
-    const RunResult r = run_process(argv, {}, ctx.cancel, [&](const std::string& l) { ctx.rep.log("[link] " + l); });
+    const RunResult r = run_process(argv, plan_->compiler_run, ctx.cancel, [&](const std::string& l) { ctx.rep.log("[link] " + l); });
     if (r.exit_code != 0) throw Error(kCompileFailed, "linking the game failed (exit " + std::to_string(r.exit_code) + "): " + join(r.tail, " | "));
     fs::rename(tmp_exe, exe, ec);
-    if (ec) throw Error(kFailed, "cannot install " + exe.string() + ": " + ec.message());
+    if (ec) throw Error(kFailed, "cannot install " + u8(exe) + ": " + ec.message());
     remove_tree(tmp);
     // Forget objects nothing refers to any more (an older generation of the generated code).
     for (const auto& e : fs::directory_iterator(obj)) {
-      if (!live.count(e.path().filename().string())) fs::remove(e.path(), ec);
+      if (!live.count(u8(e.path().filename()))) fs::remove(e.path(), ec);
     }
 
     Json info = Json::object();
@@ -650,8 +650,13 @@ class CompileStage : public Stage {
  private:
   void resolve(Context& ctx) {
     if (!cc_id_.empty()) return;
-    plan_->compiler = resolve_compiler(plan_->toolkit, ctx.opt.compiler);
-    cc_id_ = compiler_id(plan_->compiler, ctx.cancel);
+    plan_->compiler = resolve_compiler(plan_->toolkit, ctx.opt.compiler, self_exe().parent_path());
+    // Zig keeps a cache of the C++ library it builds for the target on first use: inside the instance, so
+    // that it is removed with it and nothing is written elsewhere on the player's disk.
+    if (fs::path(plan_->compiler[0]).stem() == "zig" && !std::getenv("ZIG_GLOBAL_CACHE_DIR")) {
+      plan_->compiler_run.env.push_back({"ZIG_GLOBAL_CACHE_DIR", u8(under(ctx, layout::kBuild) / "zig-cache")});
+    }
+    cc_id_ = compiler_id(plan_->compiler, plan_->compiler_run, ctx.cancel);
     ctx.rep.log("compiler: " + join(plan_->compiler) + " (" + cc_id_ + ")");
   }
   std::string flags_key() const { return plan_->toolkit.std_flag + " " + join(plan_->toolkit.flags) + " | " + join(plan_->toolkit.system_libs); }
@@ -741,16 +746,14 @@ unsigned default_jobs(const std::vector<std::string>& compiler_argv) {
   unsigned cores = std::thread::hardware_concurrency();
   if (cores == 0) cores = 2;
   double per_job_gb = 1.5;  // g++ -O1 on the largest generated file: 1.2 GB; clang++: 0.6 GB
-  if (!compiler_argv.empty() && compiler_argv[0].find("clang") != std::string::npos) per_job_gb = 0.8;
-  std::ifstream in("/proc/meminfo");
-  std::string key;
-  double kb = 0;
-  std::string unit;
-  while (in >> key >> kb >> unit) {
-    if (key == "MemAvailable:") {
-      const unsigned by_ram = static_cast<unsigned>(kb / 1048576.0 / per_job_gb);
-      return std::max(1u, std::min(cores, by_ram));
-    }
+  if (!compiler_argv.empty() &&
+      (compiler_argv[0].find("clang") != std::string::npos || fs::path(compiler_argv[0]).stem() == "zig")) {
+    per_job_gb = 0.8;  // Zig's C++ compiler is clang
+  }
+  const std::uint64_t kb = available_memory_kb();
+  if (kb != 0) {
+    const unsigned by_ram = static_cast<unsigned>(static_cast<double>(kb) / 1048576.0 / per_job_gb);
+    return std::max(1u, std::min(cores, by_ram));
   }
   return std::max(1u, cores / 2);
 }

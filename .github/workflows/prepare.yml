@@ -1,0 +1,64 @@
+name: Prepare
+
+# tos-prepare and its unit tests (no disc, no game data: synthetic images and stub programs) on both
+# platforms the release covers. The Windows job builds with MSVC and links the disc codecs statically,
+# the same way the release does.
+on:
+  push:
+    branches: [main]
+  pull_request:
+    paths:
+      - ".github/workflows/prepare.yml"
+      - "prepare/**"
+
+permissions:
+  contents: read
+
+jobs:
+  linux:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: tos-recomp
+      - uses: actions/checkout@v4
+        with:
+          repository: To-Recomp/common
+          path: common
+      - name: Install build dependencies
+        run: sudo apt-get update && sudo apt-get install -y ninja-build zlib1g-dev libbz2-dev liblzma-dev libzstd-dev
+      - name: Build
+        run: |
+          cmake -S tos-recomp/prepare -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=ON -DTOS_COMMON_DIR="$PWD/common"
+          cmake --build build
+      - name: Test
+        run: ctest --test-dir build --output-on-failure
+
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: tos-recomp
+      - uses: actions/checkout@v4
+        with:
+          repository: To-Recomp/common
+          path: common
+      - name: Install the disc codecs (static, from vcpkg)
+        shell: pwsh
+        run: |
+          & "$env:VCPKG_INSTALLATION_ROOT\vcpkg.exe" install zlib bzip2 liblzma zstd --triplet x64-windows-static
+          if ($LASTEXITCODE -ne 0) { exit 1 }
+      - name: Build (MSVC)
+        shell: pwsh
+        run: |
+          cmake -S tos-recomp/prepare -B build -A x64 -DBUILD_TESTING=ON -DTOS_COMMON_DIR="$PWD/common" `
+            -DCMAKE_TOOLCHAIN_FILE="$env:VCPKG_INSTALLATION_ROOT/scripts/buildsystems/vcpkg.cmake" `
+            -DVCPKG_TARGET_TRIPLET=x64-windows-static -DCMAKE_MSVC_RUNTIME_LIBRARY=MultiThreaded `
+            -DTOS_PREPARE_STATIC_CODECS=ON
+          if ($LASTEXITCODE -ne 0) { exit 1 }
+          cmake --build build --config Release --parallel
+          if ($LASTEXITCODE -ne 0) { exit 1 }
+      - name: Test
+        shell: pwsh
+        run: ctest --test-dir build --build-config Release --output-on-failure

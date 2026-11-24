@@ -1,10 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // tos-prepare: from the player's two disc images to a game instance that runs without the discs.
 // The design, the instance layout and the exit codes are in docs/PREPARE.md.
-#include <unistd.h>
-#include <sys/file.h>
-#include <fcntl.h>
-
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -50,9 +46,9 @@ void usage(std::FILE* f) {
 }
 
 fs::path default_toolkit() {
+  const fs::path exe = self_exe();
+  if (exe.empty()) return {};
   std::error_code ec;
-  const fs::path exe = fs::read_symlink("/proc/self/exe", ec);
-  if (ec) return {};
   const fs::path dir = exe.parent_path();
   for (const fs::path& c : {dir / "toolkit", dir / ".." / "share" / "tos-recomp" / "toolkit", dir / ".." / "toolkit"}) {
     if (fs::exists(c / "toolkit.json", ec)) return fs::weakly_canonical(c, ec);
@@ -63,7 +59,8 @@ fs::path default_toolkit() {
 }  // namespace
 
 
-int main(int argc, char** argv) {
+static int run(int argc, char** argv) {
+  init_platform();
   Options opt;
   bool check = false;
   std::vector<std::string> positional;
@@ -78,7 +75,7 @@ int main(int argc, char** argv) {
     const std::string a = argv[i];
     if (a == "--help" || a == "-h") { usage(stdout); return 0; }
     if (a == "--version") { std::printf("tos-prepare %s\n", TOS_PREPARE_VERSION); return 0; }
-    else if (a == "--data") opt.data = need(i, "--data");
+    else if (a == "--data") opt.data = from_u8(need(i, "--data"));
     else if (a == "--jobs") {
       const std::string v = need(i, "--jobs");
       char* end = nullptr;
@@ -88,10 +85,10 @@ int main(int argc, char** argv) {
     }
     else if (a == "--compiler") opt.compiler = need(i, "--compiler");
     else if (a == "--resume") opt.resume = true;
-    else if (a == "--cancel-file") opt.cancel_file = need(i, "--cancel-file");
-    else if (a == "--toolkit") opt.toolkit = need(i, "--toolkit");
-    else if (a == "--symbols") opt.symbols = need(i, "--symbols");
-    else if (a == "--dumps") opt.dumps = need(i, "--dumps");
+    else if (a == "--cancel-file") opt.cancel_file = from_u8(need(i, "--cancel-file"));
+    else if (a == "--toolkit") opt.toolkit = from_u8(need(i, "--toolkit"));
+    else if (a == "--symbols") opt.symbols = from_u8(need(i, "--symbols"));
+    else if (a == "--dumps") opt.dumps = from_u8(need(i, "--dumps"));
     else if (a == "--check") check = true;
     else if (!a.empty() && a[0] == '-') { std::fprintf(stderr, "tos-prepare: unknown option %s\n", a.c_str()); usage(stderr); return kUsage; }
     else positional.push_back(a);
@@ -107,9 +104,9 @@ int main(int argc, char** argv) {
     usage(stderr);
     return kUsage;
   }
-  for (const auto& p : positional) opt.discs.push_back(p);
+  for (const auto& p : positional) opt.discs.push_back(from_u8(p));
   if (!opt.cancel_file.empty() && fs::exists(opt.cancel_file)) {
-    std::fprintf(stderr, "tos-prepare: the cancel file %s already exists\n", opt.cancel_file.c_str());
+    std::fprintf(stderr, "tos-prepare: the cancel file %s already exists\n", u8(opt.cancel_file).c_str());
     return kUsage;
   }
   if (opt.toolkit.empty()) opt.toolkit = default_toolkit();
@@ -123,14 +120,13 @@ int main(int argc, char** argv) {
   std::error_code ec;
   fs::create_directories(opt.data, ec);
   if (ec) {
-    std::fprintf(stderr, "tos-prepare: cannot create %s: %s\n", opt.data.c_str(), ec.message().c_str());
+    std::fprintf(stderr, "tos-prepare: cannot create %s: %s\n", u8(opt.data).c_str(), ec.message().c_str());
     return kFailed;
   }
   // One run at a time per instance.
   const fs::path lock_path = opt.data / ".prepare.lock";
-  const int lock_fd = ::open(lock_path.c_str(), O_CREAT | O_RDWR | O_CLOEXEC, 0644);
-  if (lock_fd < 0 || ::flock(lock_fd, LOCK_EX | LOCK_NB) != 0) {
-    std::fprintf(stderr, "tos-prepare: another tos-prepare is working on %s\n", opt.data.c_str());
+  if (!lock_for_process(lock_path)) {
+    std::fprintf(stderr, "tos-prepare: another tos-prepare is working on %s\n", u8(opt.data).c_str());
     return kBusy;
   }
   rep.open_log(opt.data / layout::kLogs / "prepare.log");
@@ -156,3 +152,36 @@ int main(int argc, char** argv) {
   }
   return run_pipeline(ctx, stages, TOS_PREPARE_VERSION);
 }
+
+#if defined(_WIN32)
+// The narrow main() would receive the command line in the ANSI code page: take it from the wide one instead,
+// as UTF-8, so that disc and folder names with any character reach the program intact.
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#ifndef WIN32_LEAN_AND_MEAN
+#define WIN32_LEAN_AND_MEAN
+#endif
+#include <windows.h>
+#include <shellapi.h>
+
+int main() {
+  int wargc = 0;
+  wchar_t** wargv = CommandLineToArgvW(GetCommandLineW(), &wargc);
+  if (!wargv) return kFailed;
+  std::vector<std::string> args;
+  for (int i = 0; i < wargc; ++i) {
+    const int n = WideCharToMultiByte(CP_UTF8, 0, wargv[i], -1, nullptr, 0, nullptr, nullptr);
+    std::string a(static_cast<std::size_t>(n > 0 ? n - 1 : 0), '\0');
+    if (n > 1) WideCharToMultiByte(CP_UTF8, 0, wargv[i], -1, a.data(), n, nullptr, nullptr);
+    args.push_back(std::move(a));
+  }
+  LocalFree(wargv);
+  std::vector<char*> ptrs;
+  for (auto& a : args) ptrs.push_back(a.data());
+  ptrs.push_back(nullptr);
+  return run(wargc, ptrs.data());
+}
+#else
+int main(int argc, char** argv) { return run(argc, argv); }
+#endif

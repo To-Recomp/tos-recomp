@@ -6,6 +6,7 @@
 #include <vector>
 
 #include "pipeline.hpp"
+#include "process.hpp"
 #include "toolkit.hpp"
 
 namespace prep {
@@ -28,6 +29,7 @@ inline const char* kLogs = "logs";                  // logs/prepare.log
 struct Plan {
   Toolkit toolkit;
   std::vector<std::string> compiler;  // argv prefix of the C++ compiler (empty until the compile stage needs it)
+  RunOptions compiler_run;            // environment the compiler is started with (a bundled Zig keeps its cache in the instance)
 };
 
 // Builds the pipeline for `ctx` (the toolkit must be loaded). Compiler resolution is deferred to the

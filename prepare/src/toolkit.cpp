@@ -17,10 +17,10 @@ std::vector<std::string> strings(const Json& j) {
 
 fs::path need_file(const fs::path& dir, const std::string& rel, const char* what) {
   if (rel.empty()) throw Error(kNoToolchain, std::string("toolkit.json does not name the ") + what);
-  const fs::path p = dir / rel;
+  const fs::path p = dir / from_u8(rel);
   std::error_code ec;
   if (!fs::exists(p, ec)) {
-    throw Error(kNoToolchain, std::string("the toolkit's ") + what + " is missing: " + p.string());
+    throw Error(kNoToolchain, std::string("the toolkit's ") + what + " is missing: " + u8(p));
   }
   return p;
 }
@@ -33,27 +33,27 @@ Toolkit Toolkit::load(const fs::path& dir, const fs::path& symbols_dir, const fs
   const fs::path file = dir / "toolkit.json";
   std::error_code ec;
   if (!fs::exists(file, ec)) {
-    throw Error(kNoToolchain, "no toolkit found: " + file.string() +
+    throw Error(kNoToolchain, "no toolkit found: " + u8(file) +
                                   " is missing (use --toolkit, see scripts/make-toolkit.sh)");
   }
   try {
     tk.json = Json::parse(read_text(file));
   } catch (const std::exception& e) {
-    throw Error(kNoToolchain, "bad " + file.string() + ": " + e.what());
+    throw Error(kNoToolchain, "bad " + u8(file) + ": " + e.what());
   }
   const Json& j = tk.json;
-  if (j.get("format").num() != 1) throw Error(kNoToolchain, file.string() + ": unsupported format");
+  if (j.get("format").num() != 1) throw Error(kNoToolchain, u8(file) + ": unsupported format");
   tk.game_id = j.get("game_id").str();
   tk.project = j.get("project").str("game");
   tk.dumps = dumps_override.empty() ? need_file(dir, j.get("dumps").str(), "dumps.toml") : dumps_override;
-  if (!fs::exists(tk.dumps, ec)) throw Error(kNoToolchain, "dumps file not found: " + tk.dumps.string());
+  if (!fs::exists(tk.dumps, ec)) throw Error(kNoToolchain, "dumps file not found: " + u8(tk.dumps));
   tk.recompiler = need_file(dir, j.get("recompiler").str(), "recompiler");
   const Json& sym = j.get("symbols");
-  const fs::path sdir = symbols_dir.empty() ? dir / sym.get("dir").str("symbols") : symbols_dir;
-  tk.symbols_csv = sdir / sym.get("csv").str();
-  tk.symbols_extra = sdir / sym.get("extra_funcs").str();
+  const fs::path sdir = symbols_dir.empty() ? dir / from_u8(sym.get("dir").str("symbols")) : symbols_dir;
+  tk.symbols_csv = sdir / from_u8(sym.get("csv").str());
+  tk.symbols_extra = sdir / from_u8(sym.get("extra_funcs").str());
   for (const auto& f : {tk.symbols_csv, tk.symbols_extra}) {
-    if (!fs::exists(f, ec)) throw Error(kNoToolchain, "symbols file not found: " + f.string());
+    if (!fs::exists(f, ec)) throw Error(kNoToolchain, "symbols file not found: " + u8(f));
   }
   const Json& build = j.get("build");
   for (const auto& s : strings(build.get("include"))) tk.include_dirs.push_back(need_file(dir, s, "include folder"));
@@ -65,7 +65,7 @@ Toolkit Toolkit::load(const fs::path& dir, const fs::path& symbols_dir, const fs
   tk.compilers = strings(build.get("compilers"));
   tk.executable = build.get("executable").str("game");
   if (tk.game_id.empty() || tk.sources.empty() || tk.libs.empty()) {
-    throw Error(kNoToolchain, file.string() + ": game_id, build.sources and build.libs are required");
+    throw Error(kNoToolchain, u8(file) + ": game_id, build.sources and build.libs are required");
   }
   return tk;
 }
@@ -82,14 +82,24 @@ std::string Toolkit::content_hash() const {
     }
   }
   std::sort(headers.begin(), headers.end());
-  for (const auto& h : headers) acc += fs::relative(h, dir).generic_string() + " " + sha1_file(h) + "\n";
+  for (const auto& h : headers) acc += fs::relative(h, dir).generic_u8string() + " " + sha1_file(h) + "\n";
   return sha1_text(acc);
 }
 
-std::vector<std::string> resolve_compiler(const Toolkit& tk, const std::string& requested) {
-  auto try_command = [](const std::string& command) -> std::vector<std::string> {
+std::vector<std::string> resolve_compiler(const Toolkit& tk, const std::string& requested, const fs::path& program_dir) {
+  const std::string placeholder = "{program_dir}";
+  auto try_command = [&](const std::string& command) -> std::vector<std::string> {
     auto argv = split_command(command);
     if (argv.empty()) return {};
+    // A bundled compiler is named relative to the folder of tos-prepare; substituted per word so that a folder
+    // name with spaces stays one word.
+    for (auto& w : argv) {
+      const std::size_t at = w.find(placeholder);
+      if (at != std::string::npos) {
+        if (program_dir.empty()) return {};
+        w.replace(at, placeholder.size(), u8(program_dir));
+      }
+    }
     const std::string exe = find_in_path(argv[0]);
     if (exe.empty()) return {};
     argv[0] = exe;

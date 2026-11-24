@@ -1,11 +1,10 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Tests for tos-prepare. No game data: discs are tiny synthetic images (the builder is adapted from
-// To-Recomp/common's tests), the recompiler and the C++ compiler are shell stubs (tests/stubs).
-#include <signal.h>
-#include <unistd.h>
-
+// To-Recomp/common's tests), the recompiler and the C++ compiler are small stub programs (tests/stubs/fake_tool.cpp).
+// Runs on POSIX and Windows.
 #include <chrono>
 #include <cstdio>
+#include <cstdlib>
 #include <cstring>
 #include <fstream>
 #include <functional>
@@ -22,6 +21,16 @@
 #include "torecomp/gcm.hpp"
 
 using namespace prep;
+
+#if defined(_WIN32)
+static const char* const kExe = ".exe";
+static void set_env(const char* name, const char* value) { _putenv_s(name, value); }
+static void unset_env(const char* name) { _putenv_s(name, ""); }  // an empty value removes the variable
+#else
+static const char* const kExe = "";
+static void set_env(const char* name, const char* value) { setenv(name, value, 1); }
+static void unset_env(const char* name) { unsetenv(name); }
+#endif
 
 static int g_failures = 0;
 #define CHECK(cond)                                                                    \
@@ -147,6 +156,9 @@ Bytes build_image(const Node& root, const char* id, std::uint8_t disc) {
 }
 }  // namespace synth
 
+// The test programs built next to this one (see CMakeLists.txt): fake-cxx, fake-recompiler, fake-proc.
+static std::string stub(const char* name) { return u8(fs::path(TOS_PREPARE_STUBS) / (std::string(name) + kExe)); }
+
 // ---- fixtures -----------------------------------------------------------------------------------
 
 struct Temp {
@@ -215,8 +227,9 @@ static Discs make_discs(const fs::path& dir) {
 static fs::path make_toolkit(const fs::path& dir, const std::string& dumps, double executable_bytes = 1000) {
   const fs::path tk = dir / "toolkit";
   fs::create_directories(tk / "bin");
-  fs::copy_file(fs::path(TOS_PREPARE_STUBS) / "fake-recompiler.sh", tk / "bin" / "recompiler");
-  fs::permissions(tk / "bin" / "recompiler", fs::perms::owner_all);
+  fs::create_directories(tk / "bin");
+  fs::copy_file(stub("fake-recompiler"), tk / "bin" / (std::string("recompiler") + kExe));
+  fs::permissions(tk / "bin" / (std::string("recompiler") + kExe), fs::perms::owner_all);
   write_file(tk / "dumps.toml", dumps);
   write_file(tk / "symbols" / "T.csv", "80000000,foo\n");
   write_file(tk / "symbols" / "T.extra.txt", "80000100\n");
@@ -228,7 +241,7 @@ static fs::path make_toolkit(const fs::path& dir, const std::string& dumps, doub
   j["game_id"] = "TEST";
   j["project"] = "fake";
   j["dumps"] = "dumps.toml";
-  j["recompiler"] = "bin/recompiler";
+  j["recompiler"] = std::string("bin/recompiler") + kExe;
   j["symbols"] = Json::object();
   j["symbols"]["dir"] = "symbols";
   j["symbols"]["csv"] = "T.csv";
@@ -269,25 +282,20 @@ struct CliResult {
 };
 
 static CliResult run_cli(const std::vector<std::string>& args, const std::function<void(const std::string&)>& on_line = {}) {
-  std::string cmd = std::string("'") + TOS_PREPARE_BIN + "'";
-  for (const auto& a : args) cmd += " '" + a + "'";
-  cmd += " 2>/dev/null";
+  std::vector<std::string> argv = {TOS_PREPARE_BIN};
+  argv.insert(argv.end(), args.begin(), args.end());
+  RunOptions opt;
+  opt.discard_stderr = true;
+  opt.tail_lines = 1;
+  CancelToken never;
   CliResult r;
-  FILE* p = popen(cmd.c_str(), "r");
-  if (!p) return r;
-  char buf[4096];
-  while (fgets(buf, sizeof buf, p)) {
-    std::string l = buf;
-    while (!l.empty() && (l.back() == '\n' || l.back() == '\r')) l.pop_back();
+  const RunResult run = run_process(argv, opt, never, [&](const std::string& l) {
     r.lines.push_back(l);
     if (on_line) on_line(l);
-  }
-  const int st = pclose(p);
-  r.exit = WIFEXITED(st) ? WEXITSTATUS(st) : 128 + WTERMSIG(st);
+  });
+  r.exit = run.exit_code;
   return r;
 }
-
-static std::string stub(const char* name) { return (fs::path(TOS_PREPARE_STUBS) / name).string(); }
 
 // ---- tests: json, reporter, process --------------------------------------------------------------
 
@@ -354,13 +362,21 @@ static void test_reporter() {
 }
 
 static void test_process() {
+  const std::string proc = stub("fake-proc");
   CancelToken cancel;
   std::vector<std::string> out;
-  RunResult r = run_process({"sh", "-c", "echo one; echo two >&2; echo -n three; exit 7"}, {}, cancel, [&](const std::string& l) { out.push_back(l); });
+  RunResult r = run_process({proc, "lines"}, {}, cancel, [&](const std::string& l) { out.push_back(l); });
   CHECK_EQ(r.exit_code, 7);
   CHECK_EQ(out.size(), std::size_t(3));
   CHECK_EQ(out[2], std::string("three"));
   CHECK_EQ(r.tail.size(), std::size_t(3));
+
+  // standard error can be discarded instead of merged
+  RunOptions quiet;
+  quiet.discard_stderr = true;
+  out.clear();
+  run_process({proc, "lines"}, quiet, cancel, [&](const std::string& l) { out.push_back(l); });
+  CHECK_EQ(out.size(), std::size_t(2));
 
   bool missing = false;
   try { run_process({"/nonexistent/prog"}, {}, cancel, nullptr); } catch (const Error& e) { missing = e.code() == kNoToolchain; }
@@ -369,10 +385,21 @@ static void test_process() {
   RunOptions opt;
   opt.env.push_back({"TOS_TEST_VAR", "yes"});
   out.clear();
-  run_process({"sh", "-c", "echo $TOS_TEST_VAR"}, opt, cancel, [&](const std::string& l) { out.push_back(l); });
+  run_process({proc, "env", "TOS_TEST_VAR"}, opt, cancel, [&](const std::string& l) { out.push_back(l); });
   CHECK(!out.empty() && out[0] == "yes");
 
-  // Cancellation kills the whole group, including grandchildren.
+  // A value with spaces, quotes and a trailing backslash reaches the child unchanged.
+  out.clear();
+  RunOptions spaced;
+  spaced.env.push_back({"TOS_TEST_VAR", "a \"b\" c\\"});
+  run_process({proc, "env", "TOS_TEST_VAR"}, spaced, cancel, [&](const std::string& l) { out.push_back(l); });
+  CHECK(!out.empty() && out[0] == "a \"b\" c\\");
+
+  // find_in_path: a program given with its directory, and a name that is not there
+  CHECK(!find_in_path(proc).empty());
+  CHECK(find_in_path("tos-prepare-no-such-program").empty());
+
+  // Cancellation kills the whole tree, including grandchildren.
   CancelToken c2;
   long grandchild = 0;
   std::thread killer([&] {
@@ -382,14 +409,15 @@ static void test_process() {
   const auto t0 = std::chrono::steady_clock::now();
   bool cancelled = false;
   try {
-    run_process({"sh", "-c", "sleep 60 & echo $!; wait"}, {}, c2, [&](const std::string& l) { grandchild = std::atol(l.c_str()); });
+    run_process({proc, "sleeper"}, {}, c2, [&](const std::string& l) { grandchild = std::atol(l.c_str()); });
   } catch (const Cancelled&) { cancelled = true; }
   killer.join();
   CHECK(cancelled);
   CHECK(std::chrono::steady_clock::now() - t0 < std::chrono::seconds(10));
   CHECK(grandchild > 0);
-  std::this_thread::sleep_for(std::chrono::milliseconds(200));
-  CHECK(::kill(static_cast<pid_t>(grandchild), 0) != 0);  // gone (or at least not signalable)
+  std::this_thread::sleep_for(std::chrono::milliseconds(300));
+  CancelToken none;
+  CHECK_EQ(run_process({proc, "alive", std::to_string(grandchild)}, {}, none, nullptr).exit_code, 1);  // gone
 }
 
 // ---- tests: the generic pipeline ------------------------------------------------------------------
@@ -576,7 +604,7 @@ static void test_pipeline() {
 static std::vector<std::string> base_args(const Discs& d, const fs::path& data, const fs::path& tk, bool with_discs = true) {
   std::vector<std::string> a;
   if (with_discs) { a.push_back(d.d1.string()); a.push_back(d.d2.string()); }
-  a.insert(a.end(), {"--data", data.string(), "--toolkit", tk.string(), "--compiler", stub("fake-cxx.sh"), "--jobs", "2"});
+  a.insert(a.end(), {"--data", data.string(), "--toolkit", tk.string(), "--compiler", stub("fake-cxx"), "--jobs", "2"});
   return a;
 }
 
@@ -649,11 +677,11 @@ static void test_end_to_end() {
   CHECK_EQ(stage_names(r2, "skipped").size(), std::size_t(5));
   CHECK_EQ(stage_names(r2, "ok").size(), std::size_t(0));
   // --check agrees
-  CHECK_EQ(run_cli({"--data", data.string(), "--toolkit", tk.string(), "--compiler", stub("fake-cxx.sh"), "--check"}).exit, 0);
+  CHECK_EQ(run_cli({"--data", data.string(), "--toolkit", tk.string(), "--compiler", stub("fake-cxx"), "--check"}).exit, 0);
 
   // 3. symbols touched, no discs: only recompile and compile (one object) and finalize re-run
   write_file(tk / "symbols" / "T.csv", "80000000,foo\n80000010,bar\n");
-  CliResult chk = run_cli({"--data", data.string(), "--toolkit", tk.string(), "--compiler", stub("fake-cxx.sh"), "--check"});
+  CliResult chk = run_cli({"--data", data.string(), "--toolkit", tk.string(), "--compiler", stub("fake-cxx"), "--check"});
   CHECK_EQ(chk.exit, kStale);
   CHECK(chk.has("check verify up-to-date"));
   CHECK(chk.has("check extract up-to-date"));
@@ -665,7 +693,7 @@ static void test_end_to_end() {
   const Json st3 = Json::parse(slurp(data / "prepare.json"));
   CHECK_EQ(st3.get("stages").get("compile").get("info").get("compiled").num(), 1.0);  // only recomp_0001.cpp changed
   CHECK_EQ(st3.get("stages").get("compile").get("info").get("cached").num(), 3.0);
-  CHECK_EQ(run_cli({"--data", data.string(), "--toolkit", tk.string(), "--compiler", stub("fake-cxx.sh"), "--check"}).exit, 0);
+  CHECK_EQ(run_cli({"--data", data.string(), "--toolkit", tk.string(), "--compiler", stub("fake-cxx"), "--check"}).exit, 0);
 
   // 4. game files removed: rebuilding without discs says so (exit 2), with discs it extracts again
   fs::remove(data / "game" / "files" / "only1.bin");
@@ -717,15 +745,15 @@ static void test_failures() {
   CHECK_EQ(run_cli([&] { auto a = base_args(d, t.dir / "i6", tk); a[a.size() - 5] = (t.dir / "no-toolkit").string(); return a; }()).exit, kNoToolchain);
   CHECK_EQ(run_cli([&] { auto a = base_args(d, t.dir / "i7", tk); a[a.size() - 3] = "/nonexistent/c++"; return a; }()).exit, kNoToolchain);
   // recompiler and compiler failures
-  setenv("FAKE_RECOMPILER_FAIL", "1", 1);
+  set_env("FAKE_RECOMPILER_FAIL", "1");
   CliResult rr = run_cli(base_args(d, t.dir / "i8", tk));
-  unsetenv("FAKE_RECOMPILER_FAIL");
+  unset_env("FAKE_RECOMPILER_FAIL");
   CHECK_EQ(rr.exit, kRecompileFailed);
   CHECK(!fs::exists(t.dir / "i8" / "generated.partial"));
   CHECK(fs::exists(t.dir / "i8" / "game"));  // extraction is kept, so a retry needs no disc
-  setenv("FAKE_CXX_FAIL", "1", 1);
+  set_env("FAKE_CXX_FAIL", "1");
   CliResult rc = run_cli(base_args(d, t.dir / "i9", tk));
-  unsetenv("FAKE_CXX_FAIL");
+  unset_env("FAKE_CXX_FAIL");
   CHECK_EQ(rc.exit, kCompileFailed);
   CHECK(rc.lines.back().find("fake failure") != std::string::npos);
   CHECK(!fs::exists(t.dir / "i9" / "build" / "tmp"));
@@ -740,7 +768,7 @@ static void test_failures() {
   CHECK(!fs::exists(t.dir / "i10" / "game"));
   // two runs at once on one instance
   {
-    setenv("FAKE_CXX_SLEEP", "3", 1);
+    set_env("FAKE_CXX_SLEEP", "3");
     std::thread second;
     CliResult first;
     bool busy_seen = false;
@@ -752,7 +780,7 @@ static void test_failures() {
         CHECK_EQ(run_cli(args).exit, kBusy);
       }
     });
-    unsetenv("FAKE_CXX_SLEEP");
+    unset_env("FAKE_CXX_SLEEP");
     CHECK(busy_seen);
     CHECK_EQ(first.exit, 0);
   }
@@ -764,7 +792,7 @@ static void test_cancel() {
   const fs::path tk = make_toolkit(t.dir, d.dumps);
   const fs::path cancel_file = t.dir / "cancel";
   const fs::path inst = t.dir / "inst";
-  setenv("FAKE_CXX_SLEEP", "30", 1);
+  set_env("FAKE_CXX_SLEEP", "30");
   auto args = base_args(d, inst, tk);
   args.insert(args.end(), {"--cancel-file", cancel_file.string()});
   const auto t0 = std::chrono::steady_clock::now();
@@ -776,7 +804,7 @@ static void test_cancel() {
       write_file(cancel_file, "");
     }
   });
-  unsetenv("FAKE_CXX_SLEEP");
+  unset_env("FAKE_CXX_SLEEP");
   CHECK(touched);
   CHECK_EQ(r.exit, kCancelled);
   CHECK(std::chrono::steady_clock::now() - t0 < std::chrono::seconds(20));

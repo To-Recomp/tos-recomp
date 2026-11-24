@@ -62,6 +62,21 @@ class CancelToken {
 // Routes SIGINT and SIGTERM to `token` (one token per process).
 void install_signal_handlers(CancelToken& token);
 
+// Paths and text cross process boundaries as UTF-8 (protocol lines, child command lines, toolkit.json).
+// On POSIX these are the identity; on Windows, fs::path::string() would use the ANSI code page.
+std::string u8(const fs::path& p);
+fs::path from_u8(const std::string& utf8);
+
+// The running program's own file (empty when it cannot be found).
+fs::path self_exe();
+// Memory the machine can give to compiler processes now, in KiB; 0 when unknown.
+std::uint64_t available_memory_kb();
+// Takes an exclusive lock on `file` (created if needed) for the lifetime of the process; false when another
+// process holds it. The lock goes away with the process, whatever the way it ends.
+bool lock_for_process(const fs::path& file);
+// Process-wide setup: UTF-8 console output, binary stdout (no CR LF translation on Windows). No-op elsewhere.
+void init_platform();
+
 std::string sha1_file(const fs::path& file);
 std::string sha1_text(const std::string& text);
 std::string read_text(const fs::path& file);  // throws Error(kFailed) when unreadable

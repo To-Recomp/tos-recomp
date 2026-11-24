@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-// Running child processes: each in its own process group, output merged and read line by line, killed
-// (the whole group) when cancellation is requested.
+// Running child processes: each in its own process group (a Job Object on Windows), output merged and read
+// line by line, killed (the whole tree) when cancellation is requested. process_posix.cpp and
+// process_win32.cpp implement run_process and find_in_path.
 #pragma once
 
 #include <functional>
@@ -23,8 +24,10 @@ struct RunResult {
 struct RunOptions {
   std::vector<std::pair<std::string, std::string>> env;  // added to the environment
   std::size_t tail_lines = 20;
+  bool discard_stderr = false;  // standard error goes nowhere instead of being merged into the output lines
 };
 
+// The first line of text is the program, found like a shell does (PATH; on Windows also with an .exe suffix).
 // Throws Cancelled after killing the group when `cancel` fires, Error(kNoToolchain) when the program
 // cannot be started. A non-zero exit is reported in the result, not thrown.
 RunResult run_process(const std::vector<std::string>& argv, const RunOptions& options, CancelToken& cancel,
@@ -33,7 +36,8 @@ RunResult run_process(const std::vector<std::string>& argv, const RunOptions& op
 // Splits a command such as "zig c++" on spaces (no quoting).
 std::vector<std::string> split_command(const std::string& command);
 
-// Finds `name` on PATH (or returns it when it contains a slash and is executable); empty when absent.
+// Finds `name` on PATH (or returns it when it contains a path separator and is executable; on Windows a
+// name without extension also matches name.exe); empty when absent. The result is UTF-8.
 std::string find_in_path(const std::string& name);
 
 }  // namespace prep

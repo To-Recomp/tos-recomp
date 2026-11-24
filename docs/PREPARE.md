@@ -4,7 +4,7 @@ Issue: [To-Recomp/tos-recomp#3](https://github.com/To-Recomp/tos-recomp/issues/3
 
 Decisions this design follows (owner's review): the recompilation runs **on the player's machine, once, from the player's own discs**; nothing derived from the game is distributed; the result runs **without the discs**; the extracted game files stay in the instance, so a rebuild after an update needs no disc; saves use the console's memory card image only.
 
-Status: this document is the design (PR 1, with the measurements). `tos-prepare` (PR 2, in `prepare/`) implements it for Linux. Measurements marked **pending** were not done yet.
+Status: this document is the design (PR 1, with the measurements). `tos-prepare` (in `prepare/`) implements it for Linux and Windows (x86_64). Measurements marked **pending** were not done yet.
 
 Origin: the stage/progress/exit-code approach is adapted from the owner's `fepor-recomp prepare` (Rust, GPL-2.0: `crates/cli/src/commands/generate.rs`, ADR 0018 "the output folder is the game", ADR 0023 "toolchain for players"). Nothing was copied; the ideas reused are `progress` lines, copying the disc files into the instance so the game runs alone, and a marker written last.
 
@@ -16,7 +16,7 @@ Origin: the stage/progress/exit-code approach is adapted from the owner's `fepor
 - `common` is C++17 and already does everything the first two stages need (hash-verified extraction of ISO/CISO/GCZ/WIA/RVZ, Windows-safe names). Calling it as a library avoids parsing the output of `torecomp-disc`.
 - Shell scripts do not run on Windows; the launcher is Tauri (Rust) but linking it with the recompiler would tie the launcher to every game's pipeline.
 
-Build: `cmake -S prepare -B build-prepare -G Ninja -DTOS_COMMON_DIR=../common && cmake --build build-prepare && ctest --test-dir build-prepare` (as with gcrecomp, `common` is a sibling checkout by default; `-DTOS_COMMON_DIR` moves it). Tests need no game data (synthetic discs, stub recompiler and stub compiler, see `prepare/tests`).
+Build: `cmake -S prepare -B build-prepare -G Ninja -DTOS_COMMON_DIR=../common && cmake --build build-prepare && ctest --test-dir build-prepare` (as with gcrecomp, `common` is a sibling checkout by default; `-DTOS_COMMON_DIR` moves it). On Windows the release builds it with MSVC (static runtime, `-DTOS_PREPARE_STATIC_CODECS=ON` with the codecs from vcpkg's `x64-windows-static`, see `.github/workflows/prepare.yml`); a Zig cross build also compiles (`packaging/windows/zig-toolchain.cmake`). Tests need no game data (synthetic discs, a stub recompiler and a stub compiler that are small C++ programs, `prepare/tests/stubs/fake_tool.cpp`, so they run unchanged on Linux and Windows).
 
 ### Command line
 
@@ -29,13 +29,25 @@ tos-prepare --data DIR --check           exit 0 if DIR is up to date for this pr
 
 - The discs may be given in either order (disc 2 first gets a `warn`). Any format `common` reads is accepted.
 - `--jobs` defaults to `min(cores, free RAM / 1.5 GB)` (0.8 GB per job when the compiler is clang): see section 4 for the per-process memory.
-- `--compiler` is a command, split on spaces (`"zig c++"` works). Default: `$CXX`, then `clang++`, `g++`, `c++` from the toolkit's list.
-- `--cancel-file F`: when `F` exists the program stops cleanly. It must not exist at start (exit 2); the program never deletes it. SIGINT/SIGTERM do the same, which is how a launcher without a file can cancel.
+- `--compiler` is a command, split on spaces (`"zig c++"` works). Default: `$CXX`, then the toolkit's list of candidates in order (`clang++`, `g++`, `c++` on Linux; on Windows first the bundled Zig, see "Windows"). A word `{program_dir}` in a candidate stands for the folder holding `tos-prepare`.
+- `--cancel-file F`: when `F` exists the program stops cleanly. It must not exist at start (exit 2); the program never deletes it. SIGINT/SIGTERM do the same on Linux (Ctrl+C, Ctrl+Break and closing the console on Windows), which is how a launcher without a file can cancel.
 - `--resume` skips every stage whose recorded input hash is unchanged and whose outputs are still there. Without `--resume` all stages run again.
 
 ### Toolkit
 
 Everything the program needs that is ours (so it can be shipped; nothing is game-derived) lives in the **toolkit** folder described by `toolkit.json`: `bin/gcrecomp_recompiler`, `lib/libgcrecomp_*.a`, `include/gcrecomp/` (what the generated code includes), `src/main.cpp` (the boot harness), `dumps.toml`, `symbols/`, and the link line, compiler flags, how to start the game and the disk estimates. `scripts/make-toolkit.sh --gcrecomp ../gcrecomp --out DIR` builds one (1.9 MB). The recompiler and the runtime libraries are prebuilt on our side, so the player's machine only compiles the generated code (36 files) plus the harness. `tos-prepare` finds the toolkit in `<exe dir>/toolkit`, `<exe dir>/../share/tos-recomp/toolkit` or `--toolkit`.
+
+### Windows
+
+The same program, the same stages, the same protocol and exit codes; the platform parts are `prepare/src/process_win32.cpp` and the `_WIN32` branches of `common.cpp` and `main.cpp`. What differs:
+
+- **Child processes** are started with `CreateProcess` inside a **Job Object** (kill-on-close): cancelling, or `tos-prepare` dying, ends the compiler and everything it started, as `killpg` does on Linux. There is no polite SIGTERM first. A child's exit code is reported as the signed 32-bit value (a crash shows as a large negative number such as -1073741819 for an access violation). The peak memory in the log comes from the job's accounting.
+- **One run per instance** is an exclusive open of `<data>/.prepare.lock` (share mode 0): a second `tos-prepare` gets exit 9; Windows releases it when the process ends, however it ends.
+- **Memory and cores** come from `GlobalMemoryStatusEx` (available physical memory) and `hardware_concurrency`, for the `--jobs` default.
+- **Text and paths**: the command line is read from the wide command line and converted to UTF-8, every path that crosses a process boundary (protocol lines, compiler command lines, `toolkit.json`) is UTF-8, console output is switched to UTF-8 and stdout is binary (lines end in `\n` as on Linux). Extraction goes through `common`'s extended-length (`\\?\`) paths, so names over 260 characters work there; the paths `tos-prepare` itself builds under the data folder (compiler command lines) are ordinary paths, so a data folder deep enough to push them over 260 characters is not supported (**not tested**).
+- **Programs** are found on `PATH` with or without `.exe`; the game executable is `bin\tos_boot.exe`.
+- **The compiler** is the Zig the Windows archive bundles in `toolchain\zig` (`toolkit.json` lists `{program_dir}/toolchain/zig/zig c++ -target x86_64-windows-gnu` first), so a Windows player installs nothing and needs no administrator rights: Zig is unpacked with the archive, wherever the launcher installed it, and writes only to its cache. `tos-prepare` points that cache (`ZIG_GLOBAL_CACHE_DIR`) at `<data>\build\zig-cache`, unless the variable is already set, so Zig's C++ library for the target (built from source by Zig on the first compile) is removed with the instance. `--compiler` and `$CXX` still override.
+- **Linking**: the game executable is linked statically against the toolkit's libraries (gcrecomp, SDL3 built from source with Zig) and the Windows import libraries Zig supplies, with a 512 MB stack reservation (`-Wl,--stack,536870912` in `toolkit.json`; the Windows counterpart of `ulimit -s unlimited` in `tos-start`: Windows applies it to the main thread and to every thread the game starts, and only touched pages are committed).
 
 ### Stages
 
@@ -151,7 +163,7 @@ Readings:
 
 - **Linux** (Fedora, Ubuntu, Arch): usually no compiler on a desktop install; `gcc-c++` or `clang` is one package. A COPR/RPM can `Requires: clang` (or `gcc-c++`) and `SDL3`; a Flatpak would carry its own SDK.
 - **SteamOS (Steam Deck)**: read-only root, no compiler by default; `pacman` needs `steamos-readonly disable`, which a launcher must not ask.
-- **Windows**: no compiler by default (MSVC Build Tools is a 3+ GB download and a licence acceptance).
+- **Windows**: no compiler by default (MSVC Build Tools is a 3+ GB download and a licence acceptance), hence a bundled Zig (below).
 
 ### Bundling candidates (sizes from the vendors' release pages, 2026-11; **no toolchain was downloaded or run in this session**, see "pending")
 
@@ -165,7 +177,7 @@ Readings:
 ### Recommendation (per platform; the open items are marked)
 
 1. **Linux: the system compiler.** `tos-prepare` takes `--compiler`/`$CXX`/`clang++`/`g++`/`c++`, in that order, and says what to install when there is none (exit 7). Prefer clang: half the memory and faster. The package `Requires` clang or g++ and SDL3. *Implemented.*
-2. **Windows and SteamOS: a pinned Zig, downloaded once by the launcher** (57-100 MB, SHA-256 checked, kept in the launcher's library), `--compiler "<zig>/zig c++"`. Rationale: one small archive per OS, same compiler everywhere, nothing to install system-wide. The runtime libraries are **built by us with Zig** and shipped in the toolkit (the runtime is ours, not game-derived), so one stdlib is in play. *Open, not implemented here: the Zig build of the runtime libraries and SDL3, linking SDL3 on Windows, an end-to-end test on Windows and SteamOS (no machine here).* Asking SteamOS players to install a compiler is not an option; Zig runs unpacked in their home folder.
+2. **Windows: a pinned Zig inside the release archive** (100 MB download of the `x86_64-windows` zip, SHA-256 pinned and checked from `ziglang.org/download/index.json`, unpacked as `toolchain/zig` next to `tos-prepare.exe`; no administrator rights, nothing installed system-wide), used as `zig c++ -target x86_64-windows-gnu`. The runtime libraries, SDL3 and the recompiler are **built by us with the same Zig** and shipped in the toolkit (the runtime is ours, not game-derived), so one C++ library (libc++) is in play. `tos-prepare` supports this (section 2, "Windows"); the packaging is the next change. **SteamOS** is not done: the same idea with the `x86_64-linux` Zig and libraries built for it (asking SteamOS players to install a compiler is not an option; Zig runs unpacked in their home folder).
 3. **No prebuilt game executable and no prebuilt generated code**: both are game-derived and must not be distributed. Only the runtime libraries and the harness object may be prebuilt (the harness is compiled on the player's machine for now: it includes a generated header).
 4. **Build speed for the first run**: with clang, -O1 takes about 80 s at -j4 on a fast desktop (253 CPU-seconds: about 4 minutes on a 4-core/8-thread Steam Deck; **[INFERENCE]**, not measured there). A progress bar covers this; an `-O0` first build in 10 s is an option if the speed is acceptable (pending measurement) with a later `-O1` rebuild in the background. The default stays `-O1` as today.
 
@@ -175,8 +187,7 @@ One compiler process needs 0.6 GB (clang) to 1.2 GB (gcc) at -O1 on the largest 
 
 ## 5. Not in scope / limitations / follow-ups
 
-- Windows packaging and macOS: `tos-prepare` uses POSIX (`posix_spawn`, process groups, `flock`, `/proc`). The platform parts are `process.cpp` and `common.cpp`; a Windows port needs job objects instead of process groups.
-- Bundled toolchain download (Zig, SHA-256, cache in the launcher's library) and its integration in the launcher: not implemented.
+- Platforms: Linux x86_64 and Windows x86_64. macOS and SteamOS (a Zig-based archive, as for Windows) are not done. The Windows port is verified by the unit tests on a Windows runner (MSVC build) and, for the whole pipeline with real Zig, by the release workflow's smoke test; **nobody has yet run the real game on real Windows hardware**.
 - Launcher integration: the launcher's `prepare` command can be `tos-prepare {input:disc1} {input:disc2} --data {data} --cancel-file ...`; the `keeps_copy` rebuild is `tos-prepare --data {data} --resume` (no discs). Not wired here.
 - `gcrecomp` looks game files up by their disc name and ignores `paths.tsv`; names that `common` has to rename on Windows would not be found (a `warn` is printed when any was renamed). On the TOS discs on Linux every path is unchanged.
 - The harness `tos_boot` is the boot/debug harness (stops after N seconds, prints watchdog lines). A final game executable needs its own `main.cpp`.
