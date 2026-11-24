@@ -5,13 +5,13 @@
     {
       "id": "disc1",
       "role": "disc",
-      "label": "Disc 1 of Tales of Symphonia (GameCube, PAL French, GQSF), as an image of your own disc.",
+      "label": "Disc 1",
       "formats": [{ "type": "file", "extensions": ["iso", "gcm", "ciso", "gcz", "rvz", "wia"] }]
     },
     {
       "id": "disc2",
       "role": "disc",
-      "label": "Disc 2 of Tales of Symphonia (GameCube, PAL French, GQSF), as an image of your own disc.",
+      "label": "Disc 2",
       "formats": [{ "type": "file", "extensions": ["iso", "gcm", "ciso", "gcz", "rvz", "wia"] }]
     }
   ],
