@@ -95,6 +95,7 @@ else
   # tos-start.exe: the launcher starts it; it starts the game (packaging/windows/tos-start.cpp).
   "$zig" c++ -target x86_64-windows-gnu -O2 -std=c++17 "$(native "$here/packaging/windows/tos-start.cpp")" \
     -o "$(native "$stage/tos-start.exe")"
+  rm -f "$stage"/*.pdb  # Zig writes debug info next to the executable; not shipped
   cp "$here/packaging/recomplauncher.windows.json" "$stage/recomplauncher.json"
   cp "$here/LICENSE" "$here/packaging/windows/THIRD-PARTY-NOTICES.txt" "$stage/"
   mkdir -p "$stage/toolchain" "$stage/licenses"

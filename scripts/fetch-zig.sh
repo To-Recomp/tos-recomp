@@ -55,7 +55,14 @@ fi
 
 if [ ! -f "$file" ] || [ "$(sha256 "$file")" != "$sha" ]; then
   echo "downloading $url" >&2
-  curl -fL --retry 3 --retry-delay 5 -o "$file.part" "$url"
+  # ziglang.org first; a download that stalls (under 100 kB/s for 30 s) or fails falls through to the community mirrors
+  # of the pin file. A mirror is not trusted: the SHA-256 below decides.
+  got_file=0
+  for source in "$url" $(awk '$1=="mirror"{print $2 "/" "'"$(basename "$url")"'?source=tos-recomp"}' "$pin"); do
+    echo "downloading $source" >&2
+    if curl -fL --retry 2 --retry-delay 3 --speed-limit 100000 --speed-time 30 -o "$file.part" "$source"; then got_file=1; break; fi
+  done
+  [ "$got_file" = 1 ] || { echo "could not download Zig from ziglang.org or any mirror" >&2; exit 1; }
   mv "$file.part" "$file"
 fi
 got="$(sha256 "$file")"
