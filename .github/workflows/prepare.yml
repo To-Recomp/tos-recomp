@@ -47,8 +47,13 @@ jobs:
       - name: Install the disc codecs (static, from vcpkg)
         shell: pwsh
         run: |
-          & "$env:VCPKG_INSTALLATION_ROOT\vcpkg.exe" install zlib bzip2 liblzma zstd --triplet x64-windows-static
-          if ($LASTEXITCODE -ne 0) { exit 1 }
+          # The sources are downloaded from GitHub and other hosts: retry, a failed download is usually transient.
+          foreach ($attempt in 1..3) {
+            & "$env:VCPKG_INSTALLATION_ROOT\vcpkg.exe" install zlib bzip2 liblzma zstd --triplet x64-windows-static
+            if ($LASTEXITCODE -eq 0) { break }
+            if ($attempt -eq 3) { exit 1 }
+            Start-Sleep -Seconds 20
+          }
       - name: Build (MSVC)
         shell: pwsh
         run: |
