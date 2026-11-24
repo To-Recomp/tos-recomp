@@ -41,8 +41,9 @@ struct Toolkit {
   std::string content_hash() const;
 };
 
-// Compiler command: --compiler, else $CXX, else the first candidate found on PATH. Returns argv
-// (a command such as "zig c++" has several words); throws Error(kNoToolchain).
-std::vector<std::string> resolve_compiler(const Toolkit& tk, const std::string& requested);
+// Compiler command: --compiler, else $CXX, else the first candidate that exists: a candidate is looked up on
+// PATH, and "{program_dir}" in a word stands for the folder holding tos-prepare (how the Windows release
+// names its bundled Zig). Returns argv (a command such as "zig c++" has several words); throws Error(kNoToolchain).
+std::vector<std::string> resolve_compiler(const Toolkit& tk, const std::string& requested, const fs::path& program_dir);
 
 }  // namespace prep

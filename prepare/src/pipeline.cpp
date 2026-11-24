@@ -111,7 +111,7 @@ int run_pipeline(Context& ctx, std::vector<std::unique_ptr<Stage>>& stages, cons
         if (have < need + ctx.opt.reserve_bytes) {
           throw Error(kNoSpace, "not enough free disk space for the " + stage->name() + " stage: " + human_bytes(need) +
                                     " needed (plus " + human_bytes(ctx.opt.reserve_bytes) + " kept free), " +
-                                    human_bytes(have) + " available in " + ctx.data().string());
+                                    human_bytes(have) + " available in " + u8(ctx.data()));
         }
       }
 
@@ -134,7 +134,7 @@ int run_pipeline(Context& ctx, std::vector<std::unique_ptr<Stage>>& stages, cons
     current = nullptr;
     ctx.state.overall = "ready";
     ctx.state.save();
-    rep.result("ready", kOk, "the game is prepared in " + ctx.data().string());
+    rep.result("ready", kOk, "the game is prepared in " + u8(ctx.data()));
     return kOk;
   } catch (const Cancelled&) {
     if (current) {
