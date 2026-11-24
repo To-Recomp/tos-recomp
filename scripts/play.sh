@@ -15,6 +15,11 @@
 # Space = Start; W = Z; Q = L; E = R. A connected gamepad works as well. On a blank card the game asks to
 # format it: choose "Formater".
 #
+# F10 = diagnostic bundle: records the next presented frame (draws, GPU state, EFB copies, pictures) into
+# <session>/diag/diag-<n>-<time>/. Press it once while the problem is on screen (for example a blurred
+# scene), wait two seconds, and tell the developers the session name. The bundle holds game pictures:
+# never commit it.
+#
 # When you stop (close the window or Ctrl-C) the script prints where the files are and a short summary.
 # Tell the developers the session name and what you did and saw; they read the files themselves.
 # The memory card lives in the session folder: copy card.raw before experimenting if you want to keep a save.
@@ -48,15 +53,17 @@ mkdir -p "$dir/shots"
 ulimit -s unlimited
 export GCRECOMP_CARD_IMAGE="$dir/card.raw"
 export TOS_SCREENSHOT_DIR="$dir/shots" GP_SHOT_EVERY="$every"
+export GCRECOMP_DIAG_DIR="$dir/diag"
 [ "$bench" = 1 ] && export GCRECOMP_BENCH=1
 echo "[play] session '$dir' (log: run.log). Close the window to stop."
 set +e
-"$bin" "$dol" "$files" $((minutes * 60)) 2>&1 | tee "$dir/run.log" | grep -a -E '^\[(script|play)\]|unknown command|Unresolved|FATAL|panic|PANIC' &
+"$bin" "$dol" "$files" $((minutes * 60)) 2>&1 | tee "$dir/run.log" | grep -a -E '^\[(script|play|diag)\]|unknown command|Unresolved|FATAL|panic|PANIC' &
 wait $!
 set -e
 echo
 echo "[play] done. Files in $dir:"
 ls -la "$dir" | tail -n +2
 echo "[play] screenshots: $(ls "$dir/shots" 2>/dev/null | wc -l) ($(du -sh "$dir/shots" 2>/dev/null | cut -f1))"
+echo "[play] diagnostic bundles: $(ls "$dir/diag" 2>/dev/null | wc -l) in $dir/diag"
 grep -a -E '\[gp\]' "$dir/run.log" | tail -1 || true
 grep -a -c -E 'Unresolved call' "$dir/run.log" | sed 's/^/[play] unresolved calls: /' || true
