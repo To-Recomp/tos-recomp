@@ -26,13 +26,24 @@ set(BUILD_TESTING OFF)
 # Release builds carry the disc codecs (zlib, bzip2, lzma, zstd): their sonames differ between distributions
 # (libbz2.so.1.0 on Debian, libbz2.so.1 on Fedora). Looking for static libraries only, after project().
 option(TOS_PREPARE_STATIC_CODECS "Link zlib, bzip2, lzma and zstd statically" OFF)
-if(TOS_PREPARE_STATIC_CODECS)
+# (With MSVC the vcpkg triplet x64-windows-static provides static .lib files only: nothing to restrict. Restricting the
+# suffixes to .a there made every codec "not found" in the first Windows releases.)
+if(TOS_PREPARE_STATIC_CODECS AND NOT MSVC)
   set(_tos_suffixes "${CMAKE_FIND_LIBRARY_SUFFIXES}")
   set(CMAKE_FIND_LIBRARY_SUFFIXES .a)
 endif()
 add_subdirectory("${TOS_COMMON_DIR}" common EXCLUDE_FROM_ALL)
-if(TOS_PREPARE_STATIC_CODECS)
+if(TOS_PREPARE_STATIC_CODECS AND NOT MSVC)
   set(CMAKE_FIND_LIBRARY_SUFFIXES "${_tos_suffixes}")
+endif()
+if(TOS_PREPARE_STATIC_CODECS)
+  # A release must read every disc format and its own payload: a missing codec is an error here, not a warning.
+  get_target_property(_tos_defs torecomp_common INTERFACE_COMPILE_DEFINITIONS)
+  foreach(_d TORECOMP_HAVE_ZLIB TORECOMP_HAVE_BZIP2 TORECOMP_HAVE_LZMA TORECOMP_HAVE_ZSTD)
+    if(NOT _tos_defs MATCHES "${_d}")
+      message(FATAL_ERROR "TOS_PREPARE_STATIC_CODECS: ${_d} is not enabled: its static library was not found")
+    endif()
+  endforeach()
 endif()
 set(BUILD_TESTING "${_tos_testing}")
 
