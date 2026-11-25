@@ -56,8 +56,20 @@ std::string read_all(const std::string& path) {
 
 #if defined(FAKE_TOOL_CXX)
 int tool(int argc, char** argv) {
-  if (argc > 1 && !std::strcmp(argv[1], "--version")) { std::puts("fakecc 1.0 (test stub)"); return 0; }
-  if (argc > 1 && !std::strcmp(argv[1], "-dumpmachine")) { std::puts("x86_64-fake-linux"); return 0; }
+  // The queries may follow other words ("fake-cxx -target T --version"). Like `zig c++ -target x86_64-linux-gnu.2.31
+  // -dumpmachine`, -dumpmachine is refused when a target carries a glibc version.
+  bool version = false, dumpmachine = false, glibc_target = false;
+  for (int i = 1; i < argc; ++i) {
+    version = version || !std::strcmp(argv[i], "--version");
+    dumpmachine = dumpmachine || !std::strcmp(argv[i], "-dumpmachine");
+    glibc_target = glibc_target || !std::strncmp(argv[i], "x86_64-linux-gnu.", 17);
+  }
+  if (version) { std::puts("fakecc 1.0 (test stub)"); return 0; }
+  if (dumpmachine) {
+    if (glibc_target) { std::fputs("error: version '.2.31' in target triple is invalid\n", stderr); return 1; }
+    std::puts("x86_64-fake-linux");
+    return 0;
+  }
   bool compile = false;
   std::string out, src;
   for (int i = 1; i < argc; ++i) {

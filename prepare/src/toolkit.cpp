@@ -64,6 +64,7 @@ Toolkit Toolkit::load(const fs::path& dir, const fs::path& symbols_dir, const fs
   tk.std_flag = build.get("std").str("gnu++20");
   tk.compilers = strings(build.get("compilers"));
   tk.executable = build.get("executable").str("game");
+  tk.compiler_env = build.get("compiler_env").boolean(true);
   if (tk.game_id.empty() || tk.sources.empty() || tk.libs.empty()) {
     throw Error(kNoToolchain, u8(file) + ": game_id, build.sources and build.libs are required");
   }
@@ -86,18 +87,19 @@ std::string Toolkit::content_hash() const {
   return sha1_text(acc);
 }
 
-std::vector<std::string> resolve_compiler(const Toolkit& tk, const std::string& requested, const fs::path& program_dir) {
-  const std::string placeholder = "{program_dir}";
+std::vector<std::string> resolve_compiler(const Toolkit& tk, const std::string& requested, const fs::path& root,
+                                          std::string* ignored_cxx) {
+  const std::string placeholder = "{root}";
   auto try_command = [&](const std::string& command) -> std::vector<std::string> {
     auto argv = split_command(command);
     if (argv.empty()) return {};
-    // A bundled compiler is named relative to the folder of tos-prepare; substituted per word so that a folder
+    // A bundled compiler is named relative to the folder holding toolkit/ and toolchain/; substituted per word so that a folder
     // name with spaces stays one word.
     for (auto& w : argv) {
       const std::size_t at = w.find(placeholder);
       if (at != std::string::npos) {
-        if (program_dir.empty()) return {};
-        w.replace(at, placeholder.size(), u8(program_dir));
+        if (root.empty()) return {};
+        w.replace(at, placeholder.size(), u8(root));
       }
     }
     const std::string exe = find_in_path(argv[0]);
@@ -111,8 +113,12 @@ std::vector<std::string> resolve_compiler(const Toolkit& tk, const std::string& 
     return argv;
   }
   if (const char* cxx = std::getenv("CXX"); cxx && *cxx) {
-    auto argv = try_command(cxx);
-    if (!argv.empty()) return argv;
+    if (!tk.compiler_env) {
+      if (ignored_cxx) *ignored_cxx = cxx;
+    } else {
+      auto argv = try_command(cxx);
+      if (!argv.empty()) return argv;
+    }
   }
   for (const auto& c : tk.compilers) {
     auto argv = try_command(c);
@@ -121,7 +127,7 @@ std::vector<std::string> resolve_compiler(const Toolkit& tk, const std::string& 
   std::string names;
   for (const auto& c : tk.compilers) names += (names.empty() ? "" : ", ") + c;
   throw Error(kNoToolchain, "no C++ compiler found (looked for " + names +
-                                "); install clang or g++, or pass --compiler PATH");
+                                "); pass --compiler PATH");
 }
 
 }  // namespace prep

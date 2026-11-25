@@ -6,13 +6,15 @@ Decisions this design follows (owner's review): the recompilation runs **on the 
 
 Status: this document is the design (PR 1, with the measurements). `tos-prepare` (in `prepare/`) implements it for Linux and Windows (x86_64). Measurements marked **pending** were not done yet.
 
+**Self-contained release (owner's decision, after the first release candidates):** the player installs nothing, not even a C++ compiler or SDL3 development files, on Linux (SteamOS included) and Windows. The release's `tos-prepare` is one file that carries everything the extraction and the recompilation need: disc reading (linked in), the recompiler, a pinned Zig as the C++ compiler, the runtime libraries, SDL3, the headers, the boot harness source, the symbols and `dumps.toml`. Nothing derived from a game is distributed: no generated C++ and no recompiled game executable, those are made on the player's computer from the player's own discs. Sections "The payload" and 3 describe how; `docs/RELEASING.md` how it is built and proved.
+
 Origin: the stage/progress/exit-code approach is adapted from the owner's `fepor-recomp prepare` (Rust, GPL-2.0: `crates/cli/src/commands/generate.rs`, ADR 0018 "the output folder is the game", ADR 0023 "toolchain for players"). Nothing was copied; the ideas reused are `progress` lines, copying the disc files into the instance so the game runs alone, and a marker written last.
 
 ## 1. The program
 
 `tos-prepare` is **one C++17 program in this repository** (`prepare/`, CMake), linked with `To-Recomp/common` (disc reading, verification, extraction). Why C++ and not Rust, shell or Python:
 
-- The player already needs a C++ compiler for the compile stage; a second runtime (Python, Rust toolchain) would be one more thing to ship or install. A single static executable next to the launcher is the smallest thing that works on Linux, Windows and SteamOS.
+- The compile stage needs a C++ compiler, and the release carries one (a pinned Zig, inside the program); a second runtime (Python, Rust toolchain) would be one more thing to ship. A single self-contained executable next to the launcher is the smallest thing that works on Linux, Windows and SteamOS.
 - `common` is C++17 and already does everything the first two stages need (hash-verified extraction of ISO/CISO/GCZ/WIA/RVZ, Windows-safe names). Calling it as a library avoids parsing the output of `torecomp-disc`.
 - Shell scripts do not run on Windows; the launcher is Tauri (Rust) but linking it with the recompiler would tie the launcher to every game's pipeline.
 
@@ -21,21 +23,34 @@ Build: `cmake -S prepare -B build-prepare -G Ninja -DTOS_COMMON_DIR=../common &&
 ### Command line
 
 ```
-tos-prepare <disc1> <disc2> --data DIR [--jobs N] [--compiler CMD] [--resume] [--cancel-file F]
+tos-prepare <disc1> <disc2> --data DIR [--jobs N] [--resume] [--cancel-file F]
 tos-prepare --data DIR --resume          rebuild from the files kept in DIR, no disc needed
 tos-prepare --data DIR --check           exit 0 if DIR is up to date for this program, 10 if not
-   --toolkit DIR   (default: next to the program)     --symbols DIR / --dumps FILE   development overrides
+   --toolchain-cache DIR   where the carried build tools are unpacked (default: the per-user cache, see "The payload")
+   --toolkit DIR / --compiler CMD / --symbols DIR / --dumps FILE   development overrides (default: what the program carries)
 ```
 
 - The discs may be given in either order (disc 2 first gets a `warn`). Any format `common` reads is accepted.
 - `--jobs` defaults to `min(cores, free RAM / 1.5 GB)` (0.8 GB per job when the compiler is clang): see section 4 for the per-process memory.
-- `--compiler` is a command, split on spaces (`"zig c++"` works). Default: `$CXX`, then the toolkit's list of candidates in order (`clang++`, `g++`, `c++` on Linux; on Windows first the bundled Zig, see "Windows"). A word `{program_dir}` in a candidate stands for the folder holding `tos-prepare`.
+- `--compiler` is a command, split on spaces (`"zig c++"` works) and replaces the compiler the toolkit names. Default: the first candidate of the toolkit's list that exists; a release toolkit lists only its own Zig, `{root}/toolchain/zig/zig c++ -target x86_64-linux-gnu.2.31` (or `-target x86_64-windows-gnu`), where `{root}` is the folder holding `toolkit/` and `toolchain/` (the unpacked payload). `$CXX` is honoured only by a development toolkit (one that does not set `build.compiler_env` to false): the release's libraries are built with Zig's libc++ and an environment's `CXX=g++` (libstdc++) would link nothing, so it is ignored, with a line in the log.
 - `--cancel-file F`: when `F` exists the program stops cleanly. It must not exist at start (exit 2); the program never deletes it. SIGINT/SIGTERM do the same on Linux (Ctrl+C, Ctrl+Break and closing the console on Windows), which is how a launcher without a file can cancel.
 - `--resume` skips every stage whose recorded input hash is unchanged and whose outputs are still there. Without `--resume` all stages run again.
 
 ### Toolkit
 
-Everything the program needs that is ours (so it can be shipped; nothing is game-derived) lives in the **toolkit** folder described by `toolkit.json`: `bin/gcrecomp_recompiler`, `lib/libgcrecomp_*.a`, `include/gcrecomp/` (what the generated code includes), `src/main.cpp` (the boot harness), `dumps.toml`, `symbols/`, and the link line, compiler flags, how to start the game and the disk estimates. `scripts/make-toolkit.sh --gcrecomp ../gcrecomp --out DIR` builds one (1.9 MB). The recompiler and the runtime libraries are prebuilt on our side, so the player's machine only compiles the generated code (36 files) plus the harness. `tos-prepare` finds the toolkit in `<exe dir>/toolkit`, `<exe dir>/../share/tos-recomp/toolkit` or `--toolkit`.
+Everything the program needs that is ours (so it can be shipped; nothing is game-derived) lives in the **toolkit** folder described by `toolkit.json`: `bin/gcrecomp_recompiler`, `lib/libgcrecomp_*.a`, `include/gcrecomp/` (what the generated code includes), `src/main.cpp` (the boot harness), `dumps.toml`, `symbols/`, and the link line, compiler flags, how to start the game and the disk estimates. `scripts/make-toolkit.sh --gcrecomp ../gcrecomp --out DIR` builds one (1.9 MB). The recompiler and the runtime libraries are prebuilt on our side, so the player's machine only compiles the generated code (36 files) plus the harness. A release's `tos-prepare` carries the toolkit inside itself (next section); `--toolkit DIR` replaces it with a folder (development), and without a payload the program looks in `<exe dir>/toolkit`, `<exe dir>/../share/tos-recomp/toolkit` and `<exe dir>/../toolkit`.
+
+### The payload and the toolchain cache
+
+The release's `tos-prepare` is the executable (about 3 MB) followed by a **payload**: the toolkit and the pinned Zig compiler, compressed (xz/LZMA2, preset 9 extreme, one stream), then a 64-byte trailer (magic, sizes, SHA-256 of the packed stream). Everything is in `prepare/src/payload.hpp`; `tos-payload attach|info|extract` (`prepare/tools/payload_tool.cpp`) adds, shows and unpacks it.
+
+- **Why a trailer** and not a linker section or a resource: the same executable is built without a payload for development and tests, and the payload (hundreds of MB) is added afterwards without relinking. `strip` rewrites an ELF file and drops the bytes it does not know, so the release script strips *before* attaching. Windows code signing (Authenticode) appends the certificate table after the overlay: the trailer is looked up from the PE header's security directory, not from the end of the file (unit-tested with a synthetic signed PE), and `tos-payload` refuses a program that is already signed ("attach first, then sign"). The OS loader ignores bytes after the last section, so the program is a normal executable.
+- **First use** unpacks into `<cache>/<id>/`, `<id>` = the first 16 hex digits of the payload's SHA-256. `<cache>` is `--toolchain-cache`, else `$TOS_RECOMP_CACHE`, else `$XDG_CACHE_HOME/tos-recomp` or `~/.cache/tos-recomp` (Windows: `%LOCALAPPDATA%\tos-recomp`); when that cannot be written, `<data>/.toolchain`. About 410 MB on Linux (Zig 407 MB trimmed, plus the toolkit), measured numbers in `docs/RELEASING.md`.
+- **Verified and atomic**: the packed stream's SHA-256 is computed while it is decompressed and compared with the trailer's at the end; the tree is written to `<id>.partial/`, `MANIFEST` (size and path of every file) last, and the folder is renamed to `<id>/` only then. Every run checks that `MANIFEST` is there and that every file it lists exists with the listed size (one `stat` per file); a missing or truncated file makes the next run unpack again. Paths in the payload must be relative with no `..` (refused otherwise), and symbolic links are not carried.
+- **Two instances at once**: `<id>.unpack` is an exclusive lock held while unpacking, so the second `tos-prepare` waits (polling, and it stays cancellable) and then finds the result. `<id>.use` is a shared lock held for as long as a `tos-prepare` runs from `<id>`. After a successful start, other `<id>/` and `<id>.partial/` folders whose locks can be taken (a previous release's) are removed. Locks are `flock` (Linux) and `LockFileEx` (Windows): they go away when the process ends, however it ends.
+- **Disk**: the unpack needs the payload's size plus 128 MB free on the cache volume (exit 4 otherwise), checked before writing.
+- **Offline**: nothing is downloaded, at any time. The libc++ that Zig builds for the target is built from the sources inside the payload on the first compile of an instance (about 7 s), into the instance's `build/zig-cache` (a Zig cache primed in advance does not survive being unpacked at another path: its keys include the path, measured).
+- **In the protocol** the unpack is a pseudo-stage `toolchain`, number 1 of 6; the five stages below become 2/6 to 6/6 and the overall `progress` starts the stages at 0.06 (`protocol 1` is unchanged: the launcher reads `progress <fraction> <text>`, and `stage-*` lines are additive). When the cache is there, the stage is announced as `Checking the build tools` and ends `skipped`; `--check` does not announce it unless it has to unpack (it needs the toolkit's hashes to compare).
 
 ### Windows
 
@@ -46,7 +61,7 @@ The same program, the same stages, the same protocol and exit codes; the platfor
 - **Memory and cores** come from `GlobalMemoryStatusEx` (available physical memory) and `hardware_concurrency`, for the `--jobs` default.
 - **Text and paths**: the command line is read from the wide command line and converted to UTF-8, every path that crosses a process boundary (protocol lines, compiler command lines, `toolkit.json`) is UTF-8, console output is switched to UTF-8 and stdout is binary (lines end in `\n` as on Linux). Extraction goes through `common`'s extended-length (`\\?\`) paths, so names over 260 characters work there; the paths `tos-prepare` itself builds under the data folder (compiler command lines) are ordinary paths, so a data folder deep enough to push them over 260 characters is not supported (**not tested**).
 - **Programs** are found on `PATH` with or without `.exe`; the game executable is `bin\tos_boot.exe`.
-- **The compiler** is the Zig the Windows archive bundles in `toolchain\zig` (`toolkit.json` lists `{program_dir}/toolchain/zig/zig c++ -target x86_64-windows-gnu` first), so a Windows player installs nothing and needs no administrator rights: Zig is unpacked with the archive, wherever the launcher installed it, and writes only to its cache. `tos-prepare` points that cache (`ZIG_GLOBAL_CACHE_DIR`) at `<data>\build\zig-cache`, unless the variable is already set, so Zig's C++ library for the target (built from source by Zig on the first compile) is removed with the instance. `--compiler` and `$CXX` still override.
+- **The compiler** is the Zig the Windows release carries in its payload (`toolkit.json` lists `{root}/toolchain/zig/zig c++ -target x86_64-windows-gnu`), so a Windows player installs nothing and needs no administrator rights: Zig is unpacked into `%LOCALAPPDATA%\tos-recomp\<id>\toolchain\zig` and writes only to its cache. `tos-prepare` points that cache (`ZIG_GLOBAL_CACHE_DIR`) at `<data>\build\zig-cache`, unless the variable is already set, so Zig's C++ library for the target (built from source by Zig on the first compile) is removed with the instance. `--compiler` still overrides.
 - **Linking**: the game executable is linked statically against the toolkit's libraries (gcrecomp, SDL3 built from source with Zig) and the Windows import libraries Zig supplies, with a 512 MB stack reservation (`-Wl,--stack,536870912` in `toolkit.json`; the Windows counterpart of `ulimit -s unlimited` in `tos-start`: Windows applies it to the main thread and to every thread the game starts, and only touched pages are committed).
 
 ### Stages
@@ -59,6 +74,8 @@ The same program, the same stages, the same protocol and exit codes; the platfor
 | 4 | `compile` | Compiles `generated/*.cpp` and the harness with the C++ compiler (object cache keyed by content), links with the runtime libraries into `bin/tos_boot`. | no |
 | 5 | `finalize` | Creates `saves/ config/ logs/`, writes the versions and the way to start the game into `prepare.json`. | no |
 
+A release run has a stage 0 before these, `toolchain` (unpacking the payload, see above), numbered 1 of 6; the stages above are then 2/6 to 6/6.
+
 **What disc 2 adds** (measured with `torecomp-disc manifest` on the owner's two scrubbed dumps): the discs have the same `main.dol`, apploader and the same 1,667 files (1,076 MB); they differ in `opening.bnr` (banner, 7.5 KB) and in the content of the story: disc 1 alone has 16 files (256 MB: `EV/sce_001_009.afs` ... `sce_071_083.afs`, movies `as1 s01 s03 s07 s08`, `ndog01..03.bin`), disc 2 alone has 9 files (313 MB: `EV/sce_084_090.afs` ... `sce_121_132.afs`, movies `as2 as3 s09 s10`). So the instance holds one merged tree (1.65 GB instead of 2.8 GB): disc 1 whole, plus disc 2's nine files. On a differing file the disc 1 copy wins and the difference is logged (`opening.bnr`). **Not tested:** whether the game, when it asks for disc 2, accepts the merged tree (disc-id checks in the DVD HLE). That is a gcrecomp question to settle by playing past the disc change; see open points.
 
 ### Progress protocol (stdout)
@@ -67,7 +84,9 @@ One line each, flushed; everything else (child output, details) goes to `logs/pr
 
 ```
 protocol 1 tos-prepare 0.1.0
-stage-start extract 2/5 Copying the game files from the discs
+stage-start toolchain 1/6 Unpacking the build tools (first run only)   release only: unpacking the payload; ends `ok`, or `skipped` when it is there
+stage-progress toolchain 104857600/299785402 Unpacking the build tools (first run only, 285.9 MB)
+stage-start extract 3/6 Copying the game files from the discs     (without a payload: 2/5)
 stage-progress extract 734003200/2919956480 Copying the files of disc 1     (done/total; units are bytes, files or per-mille by stage)
 progress 0.167 Copying the files of disc 1        overall 0..1, the launcher's own `progress <fraction> <text>` format
 stage-end extract ok 41.3                         ok | skipped | failed | cancelled, seconds
@@ -85,10 +104,10 @@ Deviation from the first sketch (`progress <stage> <done>/<total> <message>`): t
 | 1 | unexpected error |
 | 2 | bad usage; also a rebuild without discs when the kept files are missing; cancel file already present |
 | 3 | a disc is missing, unreadable, from another game/release, a duplicate, or not a known dump (message gives the SHA-1 and content_sha1) |
-| 4 | not enough free disk space (message gives need and available) |
+| 4 | not enough free disk space (message gives need and available): to unpack the payload, or for a stage |
 | 5 | the C++ compiler or the linker failed (message gives the file and the last lines) |
 | 6 | the recompiler failed |
-| 7 | toolkit missing or inconsistent, or no usable C++ compiler |
+| 7 | toolkit missing or inconsistent, no usable C++ compiler, or no folder the payload can be unpacked into |
 | 8 | extraction failed (read error, hash mismatch, I/O) |
 | 9 | another `tos-prepare` is working on the same `--data` (flock on `.prepare.lock`) |
 | 10 | `--check` only: the instance is stale |
@@ -161,33 +180,41 @@ Readings:
 
 ### What players have
 
-- **Linux** (Fedora, Ubuntu, Arch): usually no compiler on a desktop install; `gcc-c++` or `clang` is one package. A COPR/RPM can `Requires: clang` (or `gcc-c++`) and `SDL3`; a Flatpak would carry its own SDK.
-- **SteamOS (Steam Deck)**: read-only root, no compiler by default; `pacman` needs `steamos-readonly disable`, which a launcher must not ask.
-- **Windows**: no compiler by default (MSVC Build Tools is a 3+ GB download and a licence acceptance), hence a bundled Zig (below).
+Nothing can be assumed, so the release brings its own compiler:
 
-### Bundling candidates (sizes from the vendors' release pages, 2026-11; **no toolchain was downloaded or run in this session**, see "pending")
+- **Linux** (Fedora, Ubuntu, Arch): usually no compiler on a desktop install, and certainly no SDL3 development files.
+- **SteamOS (Steam Deck)**: read-only root, no compiler; `pacman` needs `steamos-readonly disable`, which a launcher must not ask. The user's home is writable: the payload is unpacked there.
+- **Windows**: no compiler by default (MSVC Build Tools is a 3+ GB download and a licence acceptance).
+
+### Bundling candidates (sizes from the vendors' release pages, 2026-11; Zig was downloaded, trimmed, packed and run, see "Zig, measured" below)
 
 | Candidate | Download | Notes |
 |---|---|---|
 | Zig 0.17.1 (`zig c++` = clang + lld + libc++ + libc headers + cross targets) | **57.4 MB** (`x86_64-linux` tar.xz, sha256 3581863e...b17a), **100 MB** (`x86_64-windows` zip), 53 MB aarch64-linux | one pinned archive per OS, single directory, no installer; verified by SHA-256 published in `ziglang.org/download/index.json`. Uses libc++, so **the runtime libraries must be built with the same toolchain** (libstdc++ and libc++ objects do not mix). |
 | llvm-mingw 20261117 (clang + lld + mingw-w64 for Windows) | 173-191 MB zip | Windows only; C++ ABI of MinGW. |
 | Official LLVM release (`clang+llvm`) | 1.2 GB (zstd) - 2.0 GB (xz) Linux | far too big; includes everything. |
-| System compiler | 0 | Linux only. |
+| System compiler | 0 | not an option any more: the player installs nothing. Still usable by developers with `--compiler`. |
 
-### Recommendation (per platform; the open items are marked)
+### Zig, measured (0.17.1, x86_64-linux host)
 
-1. **Linux: the system compiler.** `tos-prepare` takes `--compiler`/`$CXX`/`clang++`/`g++`/`c++`, in that order, and says what to install when there is none (exit 7). Prefer clang: half the memory and faster. The package `Requires` clang or g++ and SDL3. *Implemented.*
-2. **Windows: a pinned Zig inside the release archive** (100 MB download of the `x86_64-windows` zip, SHA-256 pinned in `packaging/windows/zig.pin` and checked against `ziglang.org/download/index.json`, unpacked as `toolchain/zig` next to `tos-prepare.exe`; no administrator rights, nothing installed system-wide), used as `zig c++ -target x86_64-windows-gnu`. The runtime libraries, SDL3 and the recompiler are **built by us with the same Zig** (`scripts/make-toolkit.sh --windows`; it cross-compiles from Linux too) and shipped in the toolkit (the runtime is ours, not game-derived), so one C++ library (libc++) is in play. *Implemented*: `docs/RELEASING.md` says what the release workflow proves on a Windows runner (a synthetic game compiled and linked with the bundled Zig against the shipped libraries, run) and what it does not. **SteamOS** is not done: the same idea with the `x86_64-linux` Zig and libraries built for it (asking SteamOS players to install a compiler is not an option; Zig runs unpacked in their home folder).
-3. **No prebuilt game executable and no prebuilt generated code**: both are game-derived and must not be distributed. Only the runtime libraries and the harness object may be prebuilt (the harness is compiled on the player's machine for now: it includes a generated header).
-4. **Build speed for the first run**: with clang, -O1 takes about 80 s at -j4 on a fast desktop (253 CPU-seconds: about 4 minutes on a 4-core/8-thread Steam Deck; **[INFERENCE]**, not measured there). A progress bar covers this; an `-O0` first build in 10 s is an option if the speed is acceptable (pending measurement) with a later `-O1` rebuild in the background. The default stays `-O1` as today.
+- The tree is 407 MB unpacked (the `zig` executable is 185 MB, `lib/` 220 MB), 390 MB as a tar. Compressed: `xz -9e` **56.8 MB** (117 s, one thread), `xz` with a 128 MiB dictionary 56.5 MB, `zstd -19 --long=27` 61.9 MB (88 s), `zstd -22 --long=27` 60.9 MB (123 s). So the payload is xz (LZMA2): 7-8% smaller than zstd; zstd would unpack faster, which does not matter next to writing 300 MB. The library that decodes it (liblzma) is already inside `tos-prepare` for the disc formats.
+- Trimming `lib/libc` of the other operating systems saves 54 MB unpacked and 5.2 MB packed (musl, WASI, BSDs, macOS), and the Windows headers and MinGW-w64 another 86 MB unpacked and 10.9 MB packed for the Linux release; with documentation, tsan and lldb files the payload's Zig is 250 MB unpacked. The release's payload (Zig 0.17.1 trimmed + the 49 MB toolkit): **299.8 MB unpacked, 52.3 MB packed** (Linux).
+- Compile with Zig of the real game's generated files (development machine; the real discs were not needed, the generated C++ of the owner's earlier run was compiled read-only): the biggest file (10.6 MB of C++) takes 54 s and 1.43 GB with `-O1 -g0` (idle machine except one other job, first compile including the 7 s build of libc++), 631 MB and 27 s with the system clang 23 (libstdc++); `-g0` matters: without it Zig writes debug information, 94 MB for that object and 2.6 GB of memory. Zig's cache primed in advance does not survive unpacking at another path (its keys include the path: tested), so each instance builds its libc++ in 7 s.
+- The real game, all 40 generated files and the harness, compiles with the shipped Zig against glibc 2.31 headers and links with the shipped libraries and static SDL3: 185 s wall with 3 jobs on the development machine (in use, `nice -n 19`), biggest file 57 s and 1.5 GB, objects 132 MB, link 7 s, a 103 MB executable that needs only libc, libm, libdl and libpthread. It was not run. Numbers in `docs/RELEASING.md`.
+
+### Recommendation
+
+1. **Both platforms: a pinned Zig inside the program**, as a payload (above), used as `zig c++ -target x86_64-linux-gnu.2.31` or `-target x86_64-windows-gnu`. SHA-256 pinned in `packaging/zig.pin` and checked against `ziglang.org/download/index.json`. The runtime libraries, SDL3 and the recompiler are **built by us with the same Zig** (`scripts/make-toolkit.sh --zig ... --target ...`), so one C++ library (libc++) is in play. SDL3 is linked statically and loads the system's X11, Wayland, ALSA, PulseAudio, OpenGL ... with `dlopen`, so the executable needs only the C library (`ldd`/`readelf` checked in CI).
+2. **No prebuilt game executable and no prebuilt generated code**: both are game-derived and must not be distributed. Only the runtime libraries and the harness source are shipped (the harness is compiled on the player's machine: it includes a generated header).
+3. **Build speed for the first run**: with Zig's clang, -O1 -g0 takes about 3 minutes with 3 jobs on a fast desktop (the largest files first, a memory gate keeps the compiler processes within three quarters of the available memory), more on a 4-core/8-thread Steam Deck (**[INFERENCE]**, not measured there). A progress bar covers this; an `-O0` first build in about a tenth of the time is an option if the speed is acceptable (pending measurement) with a later `-O1` rebuild in the background. The default stays `-O1`.
 
 ## 4. Memory and jobs
 
-One compiler process needs 0.6 GB (clang) to 1.2 GB (gcc) at -O1 on the largest generated file. `--jobs` auto = `min(cores, MemAvailable / 0.8 GB)` for clang, `/1.5 GB` otherwise. The largest-first schedule keeps the 4 or 8 workers busy until the end.
+One compiler process needs 0.6 GB (clang) to 1.2 GB (gcc) or 1.4 GB (Zig with `-g0`) at -O1 on the largest generated file, and about 135 MB per MB of C++ with Zig. `--jobs` auto = `min(cores, MemAvailable / 0.8 GB)` for clang or Zig, `/1.5 GB` otherwise. Because the largest files are all at the front of the queue, the jobs count alone cannot bound the memory: each compiler process is also admitted by a memory gate (`MemoryGate` in `stages.cpp`, estimate from the file's size: `estimate_compile_mb`) that starts a process only when the estimates of those running plus its own fit in three quarters of the memory available at the start of the stage, or when none is running. The largest-first schedule keeps the 4 or 8 workers busy until the end.
 
 ## 5. Not in scope / limitations / follow-ups
 
-- Platforms: Linux x86_64 and Windows x86_64. macOS and SteamOS (a Zig-based archive, as for Windows) are not done. The Windows port is verified by the unit tests on a Windows runner (MSVC build) and, for the whole pipeline with real Zig, by the release workflow's smoke test; **nobody has yet run the real game on real Windows hardware**.
+- Platforms: Linux x86_64 (SteamOS included: same archive, glibc 2.35 or later for `tos-prepare` itself, 2.31 for the game) and Windows x86_64. macOS is not done. Linux on ARM is not built. The Windows port is verified by the unit tests on a Windows runner (MSVC build) and, for the whole pipeline with real Zig, by the release workflow's smoke test; **nobody has yet run the real game on real Windows hardware**.
 - Launcher integration: the launcher's `prepare` command can be `tos-prepare {input:disc1} {input:disc2} --data {data} --cancel-file ...`; the `keeps_copy` rebuild is `tos-prepare --data {data} --resume` (no discs). Not wired here.
 - `gcrecomp` looks game files up by their disc name and ignores `paths.tsv`; names that `common` has to rename on Windows would not be found (a `warn` is printed when any was renamed). On the TOS discs on Linux every path is unchanged.
 - The harness `tos_boot` is the boot/debug harness (stops after N seconds, prints watchdog lines). A final game executable needs its own `main.cpp`.

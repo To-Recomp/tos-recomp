@@ -1,0 +1,38 @@
+# Ubuntu 22.04 packages the Linux release is BUILT with (release.yml, scripts/docker-release.sh). The player's machine needs
+# none of them. One package per line.
+#
+# Build tools (the host compiler builds tos-prepare itself; the game is built with Zig) and the static libraries tos-prepare is linked with (the disc codecs, so that it runs on any distribution):
+g++
+ninja-build
+cmake
+git
+ca-certificates
+pkg-config
+python3
+binutils
+zlib1g-dev
+libbz2-dev
+liblzma-dev
+libzstd-dev
+# Headers SDL3 is compiled against. SDL3 opens the libraries themselves with dlopen at run time (X11, Wayland,
+# ALSA, PulseAudio, OpenGL, udev ...): nothing of this is linked into the game or needed by the player.
+libx11-dev
+libxext-dev
+libxcursor-dev
+libxi-dev
+libxfixes-dev
+libxrandr-dev
+libxss-dev
+libxtst-dev
+libxkbcommon-dev
+libwayland-dev
+wayland-protocols
+libdecor-0-dev
+libasound2-dev
+libpulse-dev
+libgl-dev
+libegl-dev
+libdrm-dev
+libgbm-dev
+libudev-dev
+libdbus-1-dev

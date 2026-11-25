@@ -54,6 +54,7 @@ struct Options {
   bool resume = false;
   fs::path cancel_file;
   fs::path toolkit;
+  fs::path toolchain_cache;     // where a payload is unpacked (default: the per-user cache, toolchain.hpp)
   fs::path symbols;             // override of the toolkit's symbols folder
   fs::path dumps;               // override of the toolkit's dumps.toml
   std::uint64_t reserve_bytes = 256ull * 1000 * 1000;  // kept free on top of a stage's need
@@ -86,6 +87,14 @@ struct Context {
   State state;
   Json toolkit = Json::object();  // toolkit.json (see toolkit.hpp); empty in generic tests
   fs::path toolkit_dir;
+  // The folder holding toolkit/ and toolchain/: the unpacked payload, or the folder of the program when there is none.
+  // What "{root}" stands for in the toolkit's compiler candidates.
+  fs::path root;
+  // The stages before the pipeline's own (the toolchain unpack, run by main before the toolkit can be read) take
+  // `stage_offset` places in the numbering and the first `progress_start` of the overall progress.
+  int stage_offset = 0;
+  double progress_start = 0;
+  std::string payload_id;  // SHA-256 start of the payload in use; empty without one
   std::function<std::uint64_t(const fs::path&)> free_space = [](const fs::path& p) { return free_bytes(p); };
 
   Context(Options o, Reporter& r, CancelToken& c) : opt(std::move(o)), rep(r), cancel(c) {}

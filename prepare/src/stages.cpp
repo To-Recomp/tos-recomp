@@ -3,6 +3,7 @@
 
 #include <algorithm>
 #include <atomic>
+#include <chrono>
 #include <fstream>
 #include <map>
 #include <mutex>
@@ -461,10 +462,19 @@ std::string compiler_id(const std::vector<std::string>& cxx, const RunOptions& r
     std::vector<std::string> argv = cxx;
     argv.push_back(flag);
     const RunResult r = run_process(argv, run, cancel, nullptr);
-    if (r.exit_code != 0 || r.tail.empty()) {
+    const bool answered = r.exit_code == 0 && !r.tail.empty();
+    if (!answered && flag == std::string("--version")) {
       throw Error(kNoToolchain, "the compiler " + cxx[0] + " does not answer " + flag + ": it is not usable");
     }
-    id += (id.empty() ? "" : " / ") + (flag == std::string("--version") ? r.tail.front() : r.tail.back());
+    if (answered) {
+      id += (id.empty() ? "" : " / ") + (flag == std::string("--version") ? r.tail.front() : r.tail.back());
+    } else {
+      // `zig c++ -target x86_64-linux-gnu.2.31 -dumpmachine` is refused (the glibc version is not a triple): what the
+      // command line says about the target stands for the answer, so that another target is another compiler id.
+      std::string rest;
+      for (std::size_t i = 1; i < cxx.size(); ++i) rest += (rest.empty() ? "" : " ") + cxx[i];
+      id += " / " + rest;
+    }
   }
   return id;
 }
@@ -572,6 +582,9 @@ class CompileStage : public Stage {
     ctx.rep.log("compile: " + std::to_string(order.size()) + " of " + std::to_string(units.size()) + " files to compile with " +
                 std::to_string(requested_jobs) + " jobs, the rest is cached");
 
+    // Three quarters of the memory available now, shared by the compiler processes (0 = unknown: no limit).
+    const std::uint64_t available_mb = available_memory_kb() / 1024;
+    MemoryGate gate(available_mb == 0 ? ~std::uint64_t(0) : available_mb * 3 / 4);
     auto worker = [&] {
       try {
         for (;;) {
@@ -579,6 +592,9 @@ class CompileStage : public Stage {
           const std::size_t k = next.fetch_add(1);
           if (k >= order.size()) return;
           Unit& u = units[order[k]];
+          const std::uint64_t need_mb = estimate_compile_mb(plan_->compiler, u.size);
+          if (!gate.acquire(need_mb, [&] { return stop.load() || ctx.cancel.poll(); })) return;
+          struct Release { MemoryGate& g; std::uint64_t mb; ~Release() { g.release(mb); } } release{gate, need_mb};
           const fs::path tmp_obj = tmp / (u.key + ".o");
           std::vector<std::string> argv = plan_->compiler;
           argv.push_back("-std=" + tk.std_flag);
@@ -650,7 +666,11 @@ class CompileStage : public Stage {
  private:
   void resolve(Context& ctx) {
     if (!cc_id_.empty()) return;
-    plan_->compiler = resolve_compiler(plan_->toolkit, ctx.opt.compiler, self_exe().parent_path());
+    std::string ignored_cxx;
+    plan_->compiler = resolve_compiler(plan_->toolkit, ctx.opt.compiler, ctx.root, &ignored_cxx);
+    if (!ignored_cxx.empty()) {
+      ctx.rep.log("CXX=" + ignored_cxx + " is ignored: the libraries of this toolkit are built with the bundled compiler (use --compiler to override)");
+    }
     // Zig keeps a cache of the C++ library it builds for the target on first use: inside the instance, so
     // that it is removed with it and nothing is written elsewhere on the player's disk.
     if (fs::path(plan_->compiler[0]).stem() == "zig" && !std::getenv("ZIG_GLOBAL_CACHE_DIR")) {
@@ -695,6 +715,7 @@ class FinalizeStage : public Stage {
     versions["recompiler_sha1"] = sha1_file(tk.recompiler);
     versions["compiler"] = ctx.state.at("compile").info.get("compiler");
     versions["tos_prepare"] = ctx.state.tool_version;
+    if (!ctx.payload_id.empty()) versions["payload"] = ctx.payload_id;
     ctx.state.meta["versions"] = std::move(versions);
 
     Json discs = Json::array();
@@ -739,7 +760,38 @@ std::vector<std::unique_ptr<Stage>> make_stages(Context&, std::shared_ptr<Plan> 
   v.push_back(std::make_unique<RecompileStage>(plan));
   v.push_back(std::make_unique<CompileStage>(plan));
   v.push_back(std::make_unique<FinalizeStage>(plan));
+  if (static_cast<int>(v.size()) != kStageCount) throw std::logic_error("kStageCount does not match the stages");
   return v;
+}
+
+std::uint64_t estimate_compile_mb(const std::vector<std::string>& compiler_argv, std::uint64_t source_bytes) {
+  double per_mb = 120;  // g++
+  if (!compiler_argv.empty()) {
+    if (fs::path(compiler_argv[0]).stem() == "zig") per_mb = 135;
+    else if (compiler_argv[0].find("clang") != std::string::npos) per_mb = 60;
+  }
+  return 150 + static_cast<std::uint64_t>(per_mb * static_cast<double>(source_bytes) / 1e6);
+}
+
+bool MemoryGate::acquire(std::uint64_t mb, const std::function<bool()>& stop) {
+  std::unique_lock<std::mutex> lock(mu_);
+  for (;;) {
+    if (stop()) return false;
+    if (running_ == 0 || used_ + mb <= budget_) break;
+    cv_.wait_for(lock, std::chrono::milliseconds(100));
+  }
+  used_ += mb;
+  ++running_;
+  return true;
+}
+
+void MemoryGate::release(std::uint64_t mb) {
+  {
+    std::lock_guard<std::mutex> lock(mu_);
+    used_ -= mb;
+    --running_;
+  }
+  cv_.notify_all();
 }
 
 unsigned default_jobs(const std::vector<std::string>& compiler_argv) {

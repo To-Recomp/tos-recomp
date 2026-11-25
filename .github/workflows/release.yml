@@ -13,6 +13,7 @@ on:
       - "scripts/package-release.sh"
       - "scripts/make-toolkit.sh"
       - "scripts/fetch-zig.sh"
+      - "scripts/trim-zig.sh"
       - "prepare/**"
       - "tests/**"
 
@@ -41,10 +42,13 @@ jobs:
           repository: To-Recomp/gcrecomp
           path: gcrecomp
 
+      # Build machine only (packaging/linux-build-deps.txt): the static disc codecs for tos-prepare, and the headers SDL3
+      # is compiled against (it opens X11, Wayland, ALSA, PulseAudio ... with dlopen at run time, so the player's
+      # machine needs none of them).
       - name: Install build dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y ninja-build libx11-dev libxext-dev libasound2-dev libgl-dev zlib1g-dev libbz2-dev liblzma-dev libzstd-dev
+          grep -v '^#' tos-recomp/packaging/linux-build-deps.txt | xargs sudo apt-get install -y
 
       - name: Version
         id: version
@@ -52,21 +56,86 @@ jobs:
           if [ "$GITHUB_REF_TYPE" = tag ]; then v="${GITHUB_REF_NAME#v}"; else v="0.0.0-ci.${GITHUB_SHA::7}"; fi
           echo "version=$v" >> "$GITHUB_OUTPUT"
 
+      # The pinned Zig (packaging/zig.pin): the compiler that builds the toolkit here and the one packed into tos-prepare.
+      - name: Zig
+        run: tos-recomp/scripts/fetch-zig.sh --host x86_64-linux --out "$RUNNER_TEMP/zig" --check-index
+
+      - name: Licences of the codecs
+        run: |
+          mkdir -p codec-licenses
+          for pkg in zlib1g:zlib libbz2-1.0:bzip2 liblzma5:liblzma libzstd1:zstd; do
+            cp "/usr/share/doc/${pkg%%:*}/copyright" "codec-licenses/${pkg##*:}-copyright.txt"
+          done
+
       - name: Build the archive
-        run: tos-recomp/scripts/package-release.sh --version "${{ steps.version.outputs.version }}" --out "$PWD/dist" --jobs 4 --fetch-sdl3 --portable
+        run: |
+          zdir="$(ls -d "$RUNNER_TEMP"/zig/zig-x86_64-linux-*/)"
+          /usr/bin/time -v tos-recomp/scripts/package-release.sh --version "${{ steps.version.outputs.version }}" --out "$PWD/dist" \
+            --jobs 4 --zig-dist "$zdir" --portable --licenses codec-licenses 2> time.log || { cat time.log; exit 1; }
+          grep -E 'Elapsed|Maximum resident' time.log
 
       - name: Check the archive
         run: |
           cd dist && sha256sum -c SHA256SUMS
+          ls -l ./*.tar.gz
           tar -tzf ./*.tar.gz | sed 's/^/  /'
           d="$(mktemp -d)" && tar -xzf ./*.tar.gz -C "$d" && p="$(echo "$d"/*)"
+          echo "UNPACKED=$p" >> "$GITHUB_ENV"
           "$p/tos-prepare" --version
+          "$p/tos-prepare" --help | head -3
+          ls -l "$p/tos-prepare"
           # The disc codecs and the C++ runtime must be inside: a distribution may name those libraries differently.
           if ldd "$p/tos-prepare" | grep -E 'libz|libbz2|liblzma|libzstd|libstdc'; then echo "tos-prepare is not self-contained"; exit 1; fi
+          # The only libraries it asks for are the C library's.
+          ldd "$p/tos-prepare"
           python3 -c "import json,sys;m=json.load(open(sys.argv[1]));assert m['start']['program'] and m['prepare']" "$p/recomplauncher.json"
-          test -x "$p/tos-start" && test -x "$p/toolkit/bin/gcrecomp_recompiler"
+          # ONE file: the toolkit and the compiler are inside it, not next to it.
+          test -x "$p/tos-start" && test -x "$p/tos-prepare"
+          test ! -e "$p/toolkit" && test ! -e "$p/toolchain"
+          test -f "$p/LICENSE" && test -f "$p/THIRD-PARTY-NOTICES.txt" && for f in Zig-LICENSE.txt LLVM-libcxx-LICENSE.txt SDL3-LICENSE.txt gcrecomp-LICENSE.txt glibc-LICENSES.txt zlib-copyright.txt; do test -f "$p/licenses/$f" || { echo "missing licenses/$f"; exit 1; }; done
           # Nothing derived from a game may be in the archive.
           if tar -tzf ./*.tar.gz | grep -Ei '\.(iso|dol|rel|gcm|rvz)$|generated|extracted'; then echo "game-derived file in the archive"; exit 1; fi
+
+      # The synthetic discs the smoke test reads (no game data), built like tos-prepare: codecs inside, so that it runs in a
+      # minimal container.
+      - name: Synthetic disc tool
+        run: |
+          cmake -S tos-recomp/prepare -B build-synth -G Ninja -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=OFF -DTOS_COMMON_DIR="$PWD/common" \
+            -DTOS_PREPARE_STATIC_CODECS=ON -DCMAKE_EXE_LINKER_FLAGS="-static-libstdc++ -static-libgcc"
+          cmake --build build-synth --target tos-synth-discs tos_prepare_core
+
+      # The proof that matters: a machine WITHOUT a C++ compiler and WITHOUT network (a plain image, the release mounted
+      # read-only, no network) prepares the synthetic discs with the one file and runs the result. Two distributions: the
+      # oldest this tos-prepare supports (glibc 2.35) and a current one. docs/RELEASING.md.
+      - name: Smoke test of the unpacked archive, no compiler, no network
+        run: |
+          mkdir -p smoke-work && sudo chown "$(id -u):$(id -g)" smoke-work
+          for image in ubuntu:22.04 debian:stable-slim; do
+            echo "::group::$image"
+            docker run --rm --network none --user "$(id -u):$(id -g)" \
+              -v "$PWD/tos-recomp:/src:ro" -v "$UNPACKED:/release:ro" -v "$PWD/build-synth:/synth:ro" -v "$PWD/smoke-work:/work" \
+              "$image" bash /src/tests/release-smoke.sh --release /release --synth /synth/tos-synth-discs --work "/work/${image//[:\/]/_}" --keep --no-compiler \
+              2>&1 | tee "smoke-${image//[:\/]/_}.log"
+            test "${PIPESTATUS[0]}" = 0
+            echo "::endgroup::"
+          done
+
+      # The same executables, checked on the build machine (which has binutils): only the C library, no glibc newer than 2.31.
+      - name: Check the game executable the smoke test built
+        run: |
+          for g in smoke-work/*/data/bin/tos_boot; do echo "== $g"; tos-recomp/tests/check-linux-game.sh "$g" --glibc 2.31; done
+          ls -l smoke-work/*/data/bin/tos_boot
+
+      - name: Sizes and timings
+        run: |
+          {
+            echo "### Linux archive"
+            echo '```'
+            ls -l dist/*.tar.gz "$UNPACKED/tos-prepare"
+            "$UNPACKED/tos-prepare" --version
+            grep -h -E '^unpack:|^game executable:|^  log:' smoke-*.log
+            echo '```'
+          } | tee -a "$GITHUB_STEP_SUMMARY"
 
       - uses: actions/upload-artifact@v4
         with:
@@ -118,7 +187,7 @@ jobs:
             if ($attempt -eq 3) { exit 1 }
             Start-Sleep -Seconds 20
           }
-      - name: Build tos-prepare.exe and the synthetic disc tool (MSVC)
+      - name: Build tos-prepare.exe, the payload tool and the synthetic disc tool (MSVC)
         shell: pwsh
         run: |
           cmake -S tos-recomp/prepare -B build-prepare -A x64 -DBUILD_TESTING=OFF -DTOS_COMMON_DIR="$PWD/common" `
@@ -127,7 +196,7 @@ jobs:
             -DVCPKG_TARGET_TRIPLET=x64-windows-static -DCMAKE_MSVC_RUNTIME_LIBRARY=MultiThreaded `
             -DTOS_PREPARE_STATIC_CODECS=ON
           if ($LASTEXITCODE -ne 0) { exit 1 }
-          cmake --build build-prepare --config Release --parallel --target tos-prepare tos-synth-discs
+          cmake --build build-prepare --config Release --parallel --target tos-prepare tos-payload tos-synth-discs
           if ($LASTEXITCODE -ne 0) { exit 1 }
       - name: Licences of the codecs
         run: |
@@ -136,17 +205,18 @@ jobs:
             cp "$VCPKG_INSTALLATION_ROOT/installed/x64-windows-static/share/$port/copyright" "codec-licenses/$port-copyright.txt"
           done
 
-      # The pinned Zig (packaging/windows/zig.pin): bundled in the archive, and the compiler that builds the
-      # runtime libraries, SDL3 and the recompiler it contains.
+      # The pinned Zig (packaging/zig.pin): the compiler that builds the toolkit here, and the one packed into tos-prepare.exe.
       - name: Zig
         run: tos-recomp/scripts/fetch-zig.sh --host x86_64-windows --out "$RUNNER_TEMP/zig" --check-index
 
       - name: Build the archive
         run: |
           zdir="$(ls -d "$RUNNER_TEMP"/zig/zig-x86_64-windows-*/)"
+          start=$SECONDS
           tos-recomp/scripts/package-release.sh --platform windows --version "${{ steps.version.outputs.version }}" \
             --out "$PWD/dist" --jobs 4 --zig-dist "$zdir" --prepare-exe build-prepare/Release/tos-prepare.exe \
-            --licenses codec-licenses
+            --payload-tool build-prepare/Release/tos-payload.exe --licenses codec-licenses
+          echo "packaging took $((SECONDS - start)) s"
 
       - name: Check the archive
         run: |
@@ -155,18 +225,21 @@ jobs:
           rm -rf "$RUNNER_TEMP/unpacked" && mkdir "$RUNNER_TEMP/unpacked"
           python -c "import sys,zipfile;z=zipfile.ZipFile(sys.argv[1]);print(len(z.namelist()),'entries');z.extractall(sys.argv[2])" ./*.zip "$RUNNER_TEMP/unpacked"
           p="$(echo "$RUNNER_TEMP"/unpacked/*)"
-          ls "$p" "$p/toolkit" "$p/toolkit/lib" "$p/toolchain/zig" "$p/licenses"
+          ls -l "$p" "$p/licenses"
           "$p/tos-prepare.exe" --version
+          "$p/tos-prepare.exe" --help | head -3
+          # ONE file: the toolkit and the compiler are inside it, not next to it.
+          test ! -e "$p/toolkit" && test ! -e "$p/toolchain"
           d="$(mktemp -d)"
-          # No toolkit problem, no disc: the instance is simply not prepared yet (exit 10), not an error.
-          "$p/tos-prepare.exe" --data "$(cygpath -m "$d")" --check || test $? = 10
+          # No disc and an empty cache: --check unpacks the payload, then says the instance is not prepared yet (exit 10).
+          LOCALAPPDATA="$(cygpath -m "$d")" "$p/tos-prepare.exe" --data "$(cygpath -m "$d/data")" --check || test $? = 10
           python -c "import json,sys;m=json.load(open(sys.argv[1]));assert m['start']['program']==['tos-start.exe'] and m['prepare']['program']==['tos-prepare.exe'] and m['prepare']['done']==['{data}/bin/tos_boot.exe']" "$p/recomplauncher.json"
-          test -f "$p/tos-start.exe" && test -f "$p/toolkit/bin/gcrecomp_recompiler.exe" && test -f "$p/toolchain/zig/zig.exe" && test -f "$p/toolchain/zig/LICENSE"
-          test -f "$p/LICENSE" && test -f "$p/THIRD-PARTY-NOTICES.txt" && test -f "$p/licenses/SDL3-LICENSE.txt" && test -f "$p/licenses/zlib-copyright.txt"
+          test -f "$p/tos-start.exe" && test -f "$p/LICENSE" && test -f "$p/THIRD-PARTY-NOTICES.txt"
+          for f in Zig-LICENSE.txt LLVM-libcxx-LICENSE.txt SDL3-LICENSE.txt gcrecomp-LICENSE.txt mingw-w64-COPYING.txt zlib-copyright.txt; do test -f "$p/licenses/$f" || { echo "missing licenses/$f"; exit 1; }; done
           # tos-prepare.exe must not need the Visual C++ runtime or any codec DLL.
           deps="$(python - "$p/tos-prepare.exe" <<'PY'
           import re, sys
-          data = open(sys.argv[1], "rb").read()
+          data = open(sys.argv[1], "rb").read(8 * 1024 * 1024)
           print("\n".join(sorted({m.decode().lower() for m in re.findall(rb"[A-Za-z0-9_.-]+\.dll", data)})))
           PY
           )"
@@ -175,12 +248,22 @@ jobs:
           # Nothing derived from a game may be in the archive.
           if python -c "import sys,zipfile;print('\n'.join(zipfile.ZipFile(sys.argv[1]).namelist()))" ./*.zip | grep -Ei '\.(iso|dol|rel|gcm|rvz|gcz|ciso|wia|raw)$|/generated/|/extracted/|/game/'; then echo "game-derived file in the archive"; exit 1; fi
 
-      # Compiler, libraries, headers and recompiler of the archive working together, without a disc: the real
-      # tos-prepare.exe on two synthetic disc images (docs/RELEASING.md).
-      - name: Smoke test the unpacked archive
+      # The unpacked archive on two synthetic disc images, with the C and C++ compilers of the runner OUT of the PATH (Git
+      # Bash's own tools only): the real tos-prepare.exe unpacks its payload into %LOCALAPPDATA%, recompiles, compiles with
+      # the Zig it carries, links, runs the game, and the later runs skip or repair (docs/RELEASING.md).
+      - name: Smoke test of the unpacked archive, no compiler on PATH
         run: |
           p="$(echo "$RUNNER_TEMP"/unpacked/*)"
-          tos-recomp/tests/release-smoke.sh --release "$p" --synth build-prepare/Release/tos-synth-discs.exe --work "$RUNNER_TEMP/smoke"
+          PATH="/usr/bin:/c/Windows/System32:/c/Windows" tos-recomp/tests/release-smoke.sh --release "$p" \
+            --synth build-prepare/Release/tos-synth-discs.exe --work "$RUNNER_TEMP/smoke" --no-compiler --keep 2>&1 | tee smoke.log
+          test "${PIPESTATUS[0]}" = 0
+          {
+            echo "### Windows archive"
+            echo '```'
+            ls -l dist/*.zip "$p/tos-prepare.exe"
+            grep -h -E '^unpack:|^game executable:|^  log:' smoke.log
+            echo '```'
+          } | tee -a "$GITHUB_STEP_SUMMARY"
 
       - uses: actions/upload-artifact@v4
         with:

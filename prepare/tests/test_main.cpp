@@ -2,6 +2,7 @@
 // Tests for tos-prepare. No game data: discs are tiny synthetic images (the builder is adapted from
 // To-Recomp/common's tests), the recompiler and the C++ compiler are small stub programs (tests/stubs/fake_tool.cpp).
 // Runs on POSIX and Windows.
+#include <atomic>
 #include <chrono>
 #include <cstdio>
 #include <cstdlib>
@@ -11,12 +12,15 @@
 #include <map>
 #include <sstream>
 #include <thread>
+#include <vector>
 
 #include "json.hpp"
 #include "pipeline.hpp"
 #include "process.hpp"
 #include "reporter.hpp"
+#include "sha256.hpp"
 #include "stages.hpp"
+#include "toolchain.hpp"
 #include "torecomp/content.hpp"
 #include "synth_disc.hpp"
 #include "torecomp/gcm.hpp"
@@ -595,6 +599,25 @@ static void test_end_to_end() {
   CHECK_EQ(stage_names(r5, "skipped").size() >= 3, true);  // verify, recompile, compile reuse their results
 }
 
+// A compiler command with a target ("zig c++ -target x86_64-linux-gnu.2.31") that refuses -dumpmachine: still usable, and
+// the target is part of the compiler's identity.
+static void test_compiler_with_target() {
+  Temp t;
+  const Discs d = make_discs(t.dir);
+  const fs::path tk = make_toolkit(t.dir, d.dumps);
+  const fs::path data = t.dir / "instance";
+  std::vector<std::string> a = {d.d1.string(), d.d2.string(), "--data", data.string(), "--toolkit", tk.string(), "--jobs", "2",
+                                "--compiler", stub("fake-cxx") + " -target x86_64-linux-gnu.2.31"};
+  CHECK_EQ(run_cli(a).exit, 0);
+  const Json st = Json::parse(slurp(data / "prepare.json"));
+  CHECK_EQ(st.get("versions").get("compiler").str(), std::string("fakecc 1.0 (test stub) / -target x86_64-linux-gnu.2.31"));
+  // Another glibc version is another compiler: the compile stage is stale.
+  a.back() = stub("fake-cxx") + " -target x86_64-linux-gnu.2.28";
+  a.push_back("--check");
+  a.erase(a.begin(), a.begin() + 2);
+  CHECK_EQ(run_cli(a).exit, kStale);
+}
+
 static void test_failures() {
   Temp t;
   const Discs d = make_discs(t.dir);
@@ -733,6 +756,527 @@ static void test_cancel_during_extract() {
   CHECK(!fs::exists(inst / "work"));
 }
 
+
+// ---- the payload: SHA-256, the packed stream, the trailer, the cache --------------------------------------------
+
+static void test_sha256() {
+  CHECK_EQ(Sha256::hex_of("", 0), std::string("e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"));
+  CHECK_EQ(Sha256::hex_of("abc", 3), std::string("ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"));
+  const std::string two = "abcdbcdecdefdefgefghfghighijhijkijkljklmklmnlmnomnopnopq";
+  CHECK_EQ(Sha256::hex_of(two.data(), two.size()), std::string("248d6a61d20638b8e5c026930c3e6039a33ce45964ff2167f6ecedd419db06c1"));
+  // One million 'a', fed in awkward pieces.
+  Sha256 h;
+  const std::string chunk(997, 'a');
+  std::size_t left = 1000000;
+  while (left > 0) {
+    const std::size_t n = std::min(left, chunk.size());
+    h.update(chunk.data(), n);
+    left -= n;
+  }
+  CHECK_EQ(Sha256::hex(h.finish()), std::string("cdc76e5c9914fb9281a1c7e284d73e67f1809a48a497200e046d39ccc7112cd0"));
+}
+
+static void test_safe_paths() {
+  CHECK(safe_relative_path("toolkit/lib/libx.a"));
+  CHECK(safe_relative_path("a"));
+  CHECK(!safe_relative_path(""));
+  CHECK(!safe_relative_path("/etc/passwd"));
+  CHECK(!safe_relative_path("a/../b"));
+  CHECK(!safe_relative_path(".."));
+  CHECK(!safe_relative_path("a//b"));
+  CHECK(!safe_relative_path("a/./b"));
+  CHECK(!safe_relative_path("a\\b"));
+  CHECK(!safe_relative_path("C:/x"));
+  CHECK(!safe_relative_path("a/"));
+}
+
+#ifdef TORECOMP_HAVE_LZMA
+// Pseudo-random bytes (they do not compress), so that the packed stream spans several read chunks.
+static std::string noise(std::size_t n, std::uint32_t seed) {
+  std::string s(n, '\0');
+  for (auto& c : s) {
+    seed = seed * 1664525u + 1013904223u;
+    c = static_cast<char>(seed >> 24);
+  }
+  return s;
+}
+
+// A small tree: nested folders, an empty folder, an empty file, a program, text and noise.
+static fs::path make_payload_tree(const fs::path& dir, const std::string& variant = "") {
+  const fs::path t = dir / "tree";
+  write_file(t / "toolkit" / "toolkit.json", "{\"variant\":\"" + variant + "\"}");
+  write_file(t / "toolkit" / "lib" / "libbig.a", noise(3u * 1000 * 1000 + 17, 7));
+  write_file(t / "toolkit" / "lib" / "empty.bin", "");
+  write_file(t / "toolchain" / "zig" / "zig", "#!/bin/sh\necho zig\n");
+  fs::permissions(t / "toolchain" / "zig" / "zig", fs::perms::owner_all);
+  write_file(t / "toolchain" / "zig" / "lib" / "text.txt", std::string(200000, 'x') + variant);
+  fs::create_directories(t / "toolchain" / "emptydir");
+  return t;
+}
+
+static void test_payload() {
+  Temp t;
+  const fs::path tree = make_payload_tree(t.dir);
+  const fs::path base = t.dir / "base.exe";
+  write_file(base, noise(5000, 3));
+  const fs::path out = t.dir / "with-payload.exe";
+  PackOptions po;
+  po.preset = 3;
+  po.extreme = false;
+  po.threads = 1;
+  std::uint64_t last = 0;
+  const PayloadInfo made = pack_payload(tree, base, out, po, [&](std::uint64_t d, std::uint64_t) { last = d; });
+  CHECK_EQ(last, made.unpacked_size);
+  CHECK_EQ(made.offset, std::uint64_t(5000));
+  CHECK_EQ(fs::file_size(out), std::uint64_t(5000) + made.packed_size + kTrailerSize);
+  CHECK_EQ(slurp(out).substr(0, 5000), slurp(base));  // the program is untouched
+
+  const auto found = find_payload(out);
+  CHECK(found.has_value());
+  if (found) {
+    CHECK_EQ(found->offset, made.offset);
+    CHECK_EQ(found->packed_size, made.packed_size);
+    CHECK_EQ(found->unpacked_size, made.unpacked_size);
+    CHECK_EQ(found->sha256_hex(), made.sha256_hex());
+    CHECK_EQ(found->id().size(), std::size_t(16));
+  }
+  CHECK(!find_payload(base).has_value());
+
+  CancelToken never;
+  const fs::path dest = t.dir / "unpacked";
+  std::uint64_t seen = 0;
+  const std::string manifest = unpack_payload(*found, dest, never, [&](std::uint64_t d, std::uint64_t) { seen = d; });
+  CHECK_EQ(seen, found->unpacked_size);
+  CHECK_EQ(slurp(dest / "toolkit" / "lib" / "libbig.a"), slurp(tree / "toolkit" / "lib" / "libbig.a"));
+  CHECK_EQ(slurp(dest / "toolkit" / "lib" / "empty.bin"), std::string());
+  CHECK_EQ(slurp(dest / "toolchain" / "zig" / "lib" / "text.txt"), slurp(tree / "toolchain" / "zig" / "lib" / "text.txt"));
+  CHECK(fs::is_directory(dest / "toolchain" / "emptydir"));
+#if !defined(_WIN32)
+  CHECK((fs::status(dest / "toolchain" / "zig" / "zig").permissions() & fs::perms::owner_exec) != fs::perms::none);
+  CHECK((fs::status(dest / "toolkit" / "toolkit.json").permissions() & fs::perms::owner_exec) == fs::perms::none);
+#endif
+  CHECK(manifest.find("toolkit/lib/empty.bin") != std::string::npos);
+  CHECK(!unpacked_intact(dest));  // no MANIFEST yet
+  write_text_atomic(dest / "MANIFEST", manifest);
+  CHECK(unpacked_intact(dest));
+  write_file(dest / "toolkit" / "lib" / "empty.bin", "x");  // a file of the wrong size
+  CHECK(!unpacked_intact(dest));
+  write_file(dest / "toolkit" / "lib" / "empty.bin", "");
+  CHECK(unpacked_intact(dest));
+  fs::remove(dest / "toolkit" / "toolkit.json");
+  CHECK(!unpacked_intact(dest));
+
+  // Packing again onto a program that has a payload replaces it.
+  const fs::path tree2 = make_payload_tree(t.dir / "second", "two");
+  const fs::path out2 = t.dir / "second.exe";
+  const PayloadInfo made2 = pack_payload(tree2, out, out2, po);
+  CHECK_EQ(made2.offset, std::uint64_t(5000));
+  CHECK(made2.sha256_hex() != made.sha256_hex());
+  CHECK_EQ(find_payload(out2)->sha256_hex(), made2.sha256_hex());
+
+  // Damage: a flipped byte in the packed stream, a cut file, a wrong trailer.
+  std::string bytes = slurp(out);
+  {
+    std::string bad = bytes;
+    bad[5000 + made.packed_size / 2] ^= 0x55;
+    const fs::path f = t.dir / "flipped.exe";
+    write_file(f, bad);
+    bool threw = false;
+    try { unpack_payload(*find_payload(f), t.dir / "flipped", never); } catch (const Error&) { threw = true; }
+    CHECK(threw);
+  }
+  {
+    const fs::path f = t.dir / "cut.exe";
+    write_file(f, bytes.substr(0, bytes.size() - 1000));  // the trailer is gone
+    CHECK(!find_payload(f).has_value());
+  }
+  {
+    std::string bad = bytes;
+    bad[bad.size() - kTrailerSize + 16] = 0x7f;  // the packed size says more than the file has
+    bad[bad.size() - kTrailerSize + 22] = 0x7f;
+    const fs::path f = t.dir / "lying.exe";
+    write_file(f, bad);
+    bool threw = false;
+    try { find_payload(f); } catch (const Error&) { threw = true; }
+    CHECK(threw);
+  }
+  {
+    std::string bad = bytes;
+    bad[bad.size() - 3] ^= 1;  // the recorded SHA-256 no longer matches the packed stream
+    const fs::path f = t.dir / "badhash.exe";
+    write_file(f, bad);
+    bool threw = false;
+    try { unpack_payload(*find_payload(f), t.dir / "badhash", never); } catch (const Error&) { threw = true; }
+    CHECK(threw);
+  }
+  // Cancelled before anything is written.
+  {
+    CancelToken stop;
+    stop.request();
+    bool cancelled = false;
+    try { unpack_payload(*found, t.dir / "cancelled", stop); } catch (const Cancelled&) { cancelled = true; }
+    CHECK(cancelled);
+  }
+}
+
+// An executable that was code-signed: the certificate table follows the payload, so the trailer is not at the end
+// of the file and payload_end must find it from the PE headers.
+static void test_payload_signed_pe() {
+  Temp t;
+  const fs::path tree = make_payload_tree(t.dir);
+  // A minimal PE32+ header: "MZ", e_lfanew = 0x40, "PE\0\0", COFF header (20 bytes), optional header with 16 data directories.
+  std::string pe(0x40, '\0');
+  pe[0] = 'M'; pe[1] = 'Z'; pe[0x3c] = 0x40;
+  pe += std::string("PE\0\0", 4) + std::string(20, '\0');
+  std::string opt(112 + 16 * 8, '\0');
+  opt[0] = 0x0b; opt[1] = 0x02;  // 0x20b: PE32+
+  pe += opt;
+  pe += std::string(400, 'c');  // "sections"
+  const fs::path base = t.dir / "base.exe";
+  write_file(base, pe);
+  const fs::path out = t.dir / "payload.exe";
+  PackOptions po;
+  po.preset = 1;
+  po.extreme = false;
+  po.threads = 1;
+  const PayloadInfo info = pack_payload(tree, base, out, po);
+
+  std::string signed_exe = slurp(out);
+  const std::uint64_t cert_at = signed_exe.size();
+  signed_exe += std::string(2000, 'S');  // the certificate table
+  const std::size_t dir4 = 0x40 + 24 + 112 + 4 * 8;
+  for (int i = 0; i < 4; ++i) {
+    signed_exe[dir4 + i] = static_cast<char>((cert_at >> (8 * i)) & 0xff);
+    signed_exe[dir4 + 4 + i] = static_cast<char>((2000u >> (8 * i)) & 0xff);
+  }
+  const fs::path signed_path = t.dir / "signed.exe";
+  write_file(signed_path, signed_exe);
+  CHECK_EQ(payload_end(signed_path), cert_at);
+  const auto found = find_payload(signed_path);
+  CHECK(found.has_value());
+  if (found) CHECK_EQ(found->sha256_hex(), info.sha256_hex());
+  CancelToken never;
+  if (found) unpack_payload(*found, t.dir / "unpacked", never);
+  CHECK(fs::exists(t.dir / "unpacked" / "toolkit" / "toolkit.json"));
+  // Without a certificate table the end is the end of the file.
+  CHECK_EQ(payload_end(out), std::uint64_t(fs::file_size(out)));
+  // A program that is signed cannot take a payload: attach first, then sign.
+  bool threw = false;
+  try { pack_payload(tree, signed_path, t.dir / "again.exe", po); } catch (const Error&) { threw = true; }
+  CHECK(threw);
+}
+
+static void test_toolchain_cache() {
+  Temp t;
+  const fs::path tree = make_payload_tree(t.dir);
+  const fs::path base = t.dir / "base.exe";
+  write_file(base, "program");
+  const fs::path exe = t.dir / "tos-prepare.exe";
+  PackOptions po;
+  po.preset = 1;
+  po.extreme = false;
+  po.threads = 1;
+  pack_payload(tree, base, exe, po);
+  const PayloadInfo info = *find_payload(exe);
+  CancelToken never;
+  const auto plenty = [](const fs::path&) { return std::uint64_t(1) << 40; };
+  const fs::path cache = t.dir / "cache";
+
+  // First use unpacks, the second finds it.
+  {
+    Toolchain a = ensure_toolchain(info, {cache}, never, {}, plenty);
+    CHECK(a.unpacked_now);
+    CHECK_EQ(a.root, cache / info.id());
+    CHECK(unpacked_intact(a.root));
+    CHECK(fs::exists(a.root / "toolchain" / "zig" / "zig"));
+    CHECK(!fs::exists(cache / (info.id() + ".partial")));
+    Toolchain b = ensure_toolchain(info, {cache}, never, {}, plenty);
+    CHECK(!b.unpacked_now);
+    // A damaged cache is unpacked again.
+    b = Toolchain();
+    a = Toolchain();
+    fs::remove(cache / info.id() / "toolkit" / "lib" / "libbig.a");
+    Toolchain c = ensure_toolchain(info, {cache}, never, {}, plenty);
+    CHECK(c.unpacked_now);
+    CHECK(fs::exists(c.root / "toolkit" / "lib" / "libbig.a"));
+  }
+
+  // A stale folder of another release is removed, one that is in use is kept.
+  {
+    const std::string old_free = "00000000deadbeef", old_busy = "00000000cafe0001";
+    for (const auto& id : {old_free, old_busy}) {
+      write_file(cache / id / "MANIFEST", "");
+      write_file(cache / (id + ".use"), "");
+    }
+    write_file(cache / "00000000deadbeef.partial" / "x", "x");
+    auto busy = FileLock::try_acquire(cache / (old_busy + ".use"), false);
+    CHECK(busy != nullptr);
+    Toolchain a = ensure_toolchain(info, {cache}, never, {}, plenty);
+    CHECK(!fs::exists(cache / old_free));
+    CHECK(!fs::exists(cache / "00000000deadbeef.partial"));
+    CHECK(fs::exists(cache / old_busy));
+    CHECK(fs::exists(cache / info.id()));
+    busy.reset();
+    ensure_toolchain(info, {cache}, never, {}, plenty);
+    CHECK(!fs::exists(cache / old_busy));
+    CHECK(!fs::exists(cache / (old_busy + ".use")));
+  }
+
+  // Not enough space: exit code 4 and nothing left behind.
+  {
+    const fs::path small = t.dir / "small";
+    bool no_space = false;
+    try { ensure_toolchain(info, {small}, never, {}, [](const fs::path&) { return std::uint64_t(1000); }); }
+    catch (const Error& e) { no_space = e.code() == kNoSpace; }
+    CHECK(no_space);
+    CHECK(!fs::exists(small / info.id()));
+    CHECK(!fs::exists(small / (info.id() + ".partial")));
+  }
+
+  // The first folder cannot be written (a file is in the way): the next one is used.
+  {
+    write_file(t.dir / "blocked", "a file, not a folder");
+    const fs::path fallback = t.dir / "fallback";
+    Toolchain a = ensure_toolchain(info, {t.dir / "blocked" / "sub", fallback}, never, {}, plenty);
+    CHECK_EQ(a.root, fallback / info.id());
+    bool none = false;
+    try { ensure_toolchain(info, {t.dir / "blocked" / "sub"}, never, {}, plenty); }
+    catch (const Error& e) { none = e.code() == kNoToolchain; }
+    CHECK(none);
+  }
+
+  // Two at once: one unpacks, the other waits for it and finds the result.
+  {
+    const fs::path shared = t.dir / "shared";
+    std::atomic<int> unpacked{0}, failed{0};
+    std::vector<std::thread> threads;
+    for (int i = 0; i < 4; ++i) {
+      threads.emplace_back([&] {
+        try {
+          CancelToken own;
+          Toolchain tc = ensure_toolchain(info, {shared}, own, {}, plenty);
+          if (tc.unpacked_now) ++unpacked;
+          if (!unpacked_intact(tc.root)) ++failed;
+        } catch (const std::exception&) {
+          ++failed;
+        }
+      });
+    }
+    for (auto& th : threads) th.join();
+    CHECK_EQ(failed.load(), 0);
+    CHECK_EQ(unpacked.load(), 1);
+  }
+
+  // A cancelled unpack leaves no folder.
+  {
+    CancelToken stop;
+    stop.request();
+    const fs::path c = t.dir / "cancelled-cache";
+    bool cancelled = false;
+    try { ensure_toolchain(info, {c}, stop, {}, plenty); } catch (const Cancelled&) { cancelled = true; }
+    CHECK(cancelled);
+    CHECK(!fs::exists(c / info.id()));
+    CHECK(!fs::exists(c / (info.id() + ".partial")));
+  }
+}
+
+// The real program, copied and given a payload that holds the toolkit and a stand-in compiler: what a release is.
+static void test_cli_with_payload() {
+  Temp t;
+  const Discs d = make_discs(t.dir);
+  const fs::path stage = t.dir / "payload";
+  make_toolkit(stage, d.dumps);
+  {
+    // The toolkit names the compiler in the payload, and refuses $CXX: its libraries need that compiler.
+    const fs::path file = stage / "toolkit" / "toolkit.json";
+    Json j = Json::parse(slurp(file));
+    j["build"]["compilers"] = Json(Json::Array{Json("{root}/toolchain/fake-cxx" + std::string(kExe))});
+    j["build"]["compiler_env"] = false;
+    write_file(file, j.dump());
+  }
+  fs::create_directories(stage / "toolchain");
+  fs::copy_file(stub("fake-cxx"), stage / "toolchain" / (std::string("fake-cxx") + kExe));
+  fs::permissions(stage / "toolchain" / (std::string("fake-cxx") + kExe), fs::perms::owner_all);
+  const fs::path exe = t.dir / (std::string("tos-prepare-full") + kExe);
+  PackOptions po;
+  po.preset = 1;
+  po.extreme = false;
+  po.threads = 1;
+  const PayloadInfo info = pack_payload(stage, TOS_PREPARE_BIN, exe, po);
+  fs::permissions(exe, fs::perms::owner_all);
+
+  const fs::path cache = t.dir / "cache", data = t.dir / "instance";
+  const auto run = [&](std::vector<std::string> extra) {
+    std::vector<std::string> argv = {u8(exe), d.d1.string(), d.d2.string(), "--data", data.string(), "--toolchain-cache", cache.string(), "--jobs", "2"};
+    argv.insert(argv.end(), extra.begin(), extra.end());
+    RunOptions opt;
+    opt.discard_stderr = true;
+    opt.tail_lines = 1;
+    CancelToken never;
+    CliResult r;
+    r.exit = run_process(argv, opt, never, [&](const std::string& l) { r.lines.push_back(l); }).exit_code;
+    return r;
+  };
+
+  set_env("CXX", "/nonexistent/compiler-from-the-environment");
+  const CliResult first = run({});
+  CHECK_EQ(first.exit, 0);
+  CHECK(first.has("stage-start toolchain 1/6 Unpacking the build tools"));
+  CHECK(first.has("stage-start verify 2/6 "));
+  CHECK(first.has("stage-start finalize 6/6 "));
+  CHECK(first.has("stage-end toolchain ok "));
+  CHECK(first.has("stage-progress toolchain "));
+  CHECK(fs::exists(data / "bin" / "fake_game"));
+  CHECK(fs::exists(cache / info.id() / "MANIFEST"));
+  double last = 0;
+  for (const auto& l : first.lines) {
+    if (l.compare(0, 9, "progress ") == 0) {
+      const double v = std::atof(l.c_str() + 9);
+      CHECK(v + 1e-9 >= last);
+      last = v;
+    }
+  }
+  const Json st = Json::parse(slurp(data / "prepare.json"));
+  CHECK_EQ(st.get("versions").get("payload").str(), info.id());
+
+  // Second run: the build tools are there, and every stage is skipped.
+  const CliResult second = run({"--resume"});
+  CHECK_EQ(second.exit, 0);
+  CHECK(second.has("stage-end toolchain skipped "));
+  CHECK_EQ(second.count("stage-end "), 6);
+
+  // --check does not announce a toolchain that is there, and unpacks one that is not (it needs the toolkit's hashes).
+  const std::vector<std::string> check_args = {"--data", data.string(), "--toolchain-cache", cache.string(), "--check"};
+  const auto check = [&] {
+    std::vector<std::string> argv = {u8(exe)};
+    argv.insert(argv.end(), check_args.begin(), check_args.end());
+    RunOptions opt;
+    opt.discard_stderr = true;
+    opt.tail_lines = 1;
+    CancelToken never;
+    CliResult r;
+    r.exit = run_process(argv, opt, never, [&](const std::string& l) { r.lines.push_back(l); }).exit_code;
+    return r;
+  };
+  CliResult c1 = check();
+  CHECK_EQ(c1.exit, 0);
+  CHECK(!c1.has("stage-start toolchain"));
+  fs::remove_all(cache);
+  CliResult c2 = check();
+  CHECK_EQ(c2.exit, 0);
+  CHECK(c2.has("stage-end toolchain ok "));
+  CHECK(fs::exists(cache / info.id() / "MANIFEST"));
+
+  // The cache deleted: the next run unpacks again, then skips what is done.
+  fs::remove_all(cache);
+  const CliResult third = run({"--resume"});
+  CHECK_EQ(third.exit, 0);
+  CHECK(third.has("stage-end toolchain ok "));
+  CHECK_EQ(third.count("stage-end "), 6);
+
+  // A cache folder that cannot be written falls back to <data>/.toolchain.
+  write_file(t.dir / "file", "x");
+  fs::remove_all(cache);
+  const fs::path data2 = t.dir / "instance2";
+  {
+    set_env("TOS_RECOMP_CACHE", u8(t.dir / "file" / "cache").c_str());
+    std::vector<std::string> argv = {u8(exe), d.d1.string(), d.d2.string(), "--data", data2.string(), "--jobs", "2"};
+    RunOptions opt;
+    opt.discard_stderr = true;
+    opt.tail_lines = 1;
+    CancelToken never;
+    CliResult r;
+    r.exit = run_process(argv, opt, never, [&](const std::string& l) { r.lines.push_back(l); }).exit_code;
+    unset_env("TOS_RECOMP_CACHE");
+    CHECK_EQ(r.exit, 0);
+    CHECK(fs::exists(data2 / ".toolchain" / info.id() / "MANIFEST"));
+  }
+  unset_env("CXX");
+
+  // A program whose payload is damaged says so and exits 1 with a result line.
+  {
+    std::string bytes = slurp(exe);
+    bytes[bytes.size() - 100] ^= 0x20;
+    const fs::path bad = t.dir / (std::string("tos-prepare-bad") + kExe);
+    write_file(bad, bytes);
+    fs::permissions(bad, fs::perms::owner_all);
+    std::vector<std::string> argv = {u8(bad), d.d1.string(), d.d2.string(), "--data", (t.dir / "instance3").string(), "--toolchain-cache", (t.dir / "cache3").string()};
+    RunOptions opt;
+    opt.discard_stderr = true;
+    opt.tail_lines = 1;
+    CancelToken never;
+    CliResult r;
+    r.exit = run_process(argv, opt, never, [&](const std::string& l) { r.lines.push_back(l); }).exit_code;
+    CHECK_EQ(r.exit, kFailed);
+    CHECK(r.has("result failed 1 "));
+    CHECK(r.has("stage-end toolchain failed "));
+    CHECK(!fs::exists(t.dir / "cache3" / info.id()));
+  }
+}
+#endif
+
+static void test_resolve_compiler_root() {
+  Temp t;
+  const fs::path root = t.dir / "root with space";
+  fs::create_directories(root / "toolchain");
+  fs::copy_file(stub("fake-cxx"), root / "toolchain" / (std::string("cc") + kExe));
+  fs::permissions(root / "toolchain" / (std::string("cc") + kExe), fs::perms::owner_all);
+  Toolkit tk;
+  tk.compilers = {"{root}/toolchain/cc" + std::string(kExe) + " -target x"};
+  unset_env("CXX");
+  auto argv = resolve_compiler(tk, "", root);
+  CHECK_EQ(argv.size(), std::size_t(3));
+  CHECK(argv[0].find("root with space") != std::string::npos);
+  bool none = false;
+  try { resolve_compiler(tk, "", fs::path()); } catch (const Error& e) { none = e.code() == kNoToolchain; }
+  CHECK(none);
+  // $CXX: honoured for a development toolkit, ignored (and reported) for one that needs its own compiler.
+  set_env("CXX", stub("fake-proc").c_str());
+  CHECK_EQ(u8(fs::path(resolve_compiler(tk, "", root)[0]).filename()), std::string("fake-proc") + kExe);
+  tk.compiler_env = false;
+  std::string ignored;
+  CHECK_EQ(u8(fs::path(resolve_compiler(tk, "", root, &ignored)[0]).filename()), std::string("cc") + kExe);
+  CHECK_EQ(ignored, stub("fake-proc"));
+  unset_env("CXX");
+}
+
+static void test_memory_gate() {
+  // Room for 1000 MB: two of 600 MB cannot run together, a third of 300 MB can join one of them.
+  MemoryGate gate(1000);
+  const auto never = [] { return false; };
+  CHECK(gate.acquire(600, never));
+  std::atomic<bool> second_in{false};
+  std::thread t([&] {
+    if (gate.acquire(600, never)) second_in = true;
+  });
+  std::this_thread::sleep_for(std::chrono::milliseconds(300));
+  CHECK(!second_in.load());          // waiting for room
+  CHECK(gate.acquire(300, never));   // fits next to the first
+  gate.release(600);
+  t.join();                          // now the 600 MB one fits (300 + 600 <= 1000)
+  CHECK(second_in.load());
+  gate.release(600);
+  gate.release(300);
+  // A file bigger than the whole budget still runs, alone.
+  CHECK(gate.acquire(5000, never));
+  std::atomic<bool> other_in{false}, stop{false};
+  std::thread t2([&] {
+    if (gate.acquire(10, [&] { return stop.load(); })) other_in = true;
+  });
+  std::this_thread::sleep_for(std::chrono::milliseconds(300));
+  CHECK(!other_in.load());
+  stop = true;                       // cancelled while waiting: gives up without holding anything
+  t2.join();
+  CHECK(!other_in.load());
+  gate.release(5000);
+  CHECK(gate.acquire(900, never));   // everything was returned
+  gate.release(900);
+  // Estimates: the real game's biggest file with Zig is about 1.6 GB, a small one is near the base.
+  CHECK(estimate_compile_mb({"/x/zig", "c++"}, 10600000) > 1400);
+  CHECK(estimate_compile_mb({"clang++"}, 10600000) < estimate_compile_mb({"g++"}, 10600000));
+  CHECK(estimate_compile_mb({"g++"}, 0) >= 100);
+}
+
 static void test_default_jobs() {
   const unsigned j = default_jobs({"clang++"});
   CHECK(j >= 1 && j <= 4096);
@@ -744,10 +1288,21 @@ int main() {
   test_process();
   test_pipeline();
   test_default_jobs();
+  test_memory_gate();
   test_end_to_end();
   test_failures();
+  test_compiler_with_target();
   test_cancel();
   test_cancel_during_extract();
+  test_sha256();
+  test_safe_paths();
+  test_resolve_compiler_root();
+#ifdef TORECOMP_HAVE_LZMA
+  test_payload();
+  test_payload_signed_pe();
+  test_toolchain_cache();
+  test_cli_with_payload();
+#endif
   if (g_failures) {
     std::fprintf(stderr, "%d check(s) failed\n", g_failures);
     return 1;

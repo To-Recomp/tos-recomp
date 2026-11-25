@@ -74,8 +74,8 @@ int run_pipeline(Context& ctx, std::vector<std::unique_ptr<Stage>>& stages, cons
   std::vector<std::string> names;
   for (auto& s : stages) names.push_back(s->name());
 
-  double base = 0;
-  int index = 0;
+  double base = ctx.progress_start;
+  int index = ctx.stage_offset;
   Stage* current = nullptr;
   std::chrono::steady_clock::time_point started;
   auto seconds_since = [](std::chrono::steady_clock::time_point t) {
@@ -88,8 +88,8 @@ int run_pipeline(Context& ctx, std::vector<std::unique_ptr<Stage>>& stages, cons
     for (auto& stage : stages) {
       current = stage.get();
       ++index;
-      const double span = stage->weight() / total_weight;
-      rep.set_stage(stage->name(), index, static_cast<int>(stages.size()), stage->title(), base, span);
+      const double span = stage->weight() / total_weight * (1.0 - ctx.progress_start);
+      rep.set_stage(stage->name(), index, static_cast<int>(stages.size()) + ctx.stage_offset, stage->title(), base, span);
       started = std::chrono::steady_clock::now();
       ctx.cancel.check();
 

@@ -4,8 +4,10 @@
 #include <csignal>
 #include <cstdio>
 #include <ctime>
+#include <chrono>
 #include <fstream>
 #include <sstream>
+#include <thread>
 #include <vector>
 
 #include "torecomp/sha1.hpp"
@@ -20,6 +22,8 @@
 #include <fcntl.h>
 #include <io.h>
 #include <windows.h>
+#define PSAPI_VERSION 2
+#include <psapi.h>
 #else
 #include <fcntl.h>
 #include <signal.h>
@@ -98,10 +102,34 @@ std::uint64_t available_memory_kb() {
   return m.ullAvailPhys / 1024;
 }
 
+std::uint64_t peak_memory_kb() {
+  PROCESS_MEMORY_COUNTERS c{};
+  c.cb = sizeof c;
+  if (!GetProcessMemoryInfo(GetCurrentProcess(), &c, sizeof c)) return 0;
+  return c.PeakWorkingSetSize / 1024;
+}
+
 bool lock_for_process(const fs::path& file) {
   // Share mode 0: nobody else can open the file while this handle lives, and Windows closes it with the process.
   HANDLE h = CreateFileW(file.c_str(), GENERIC_READ | GENERIC_WRITE, 0, nullptr, OPEN_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
   return h != INVALID_HANDLE_VALUE;
+}
+
+struct FileLock::Impl {
+  HANDLE handle = INVALID_HANDLE_VALUE;
+  ~Impl() {
+    if (handle != INVALID_HANDLE_VALUE) CloseHandle(handle);  // releases the lock
+  }
+};
+
+std::unique_ptr<FileLock> FileLock::try_acquire(const fs::path& file, bool exclusive) {
+  auto impl = std::make_unique<Impl>();
+  impl->handle = CreateFileW(file.c_str(), GENERIC_READ | GENERIC_WRITE, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+                             nullptr, OPEN_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
+  if (impl->handle == INVALID_HANDLE_VALUE) return nullptr;
+  OVERLAPPED ov{};
+  if (!LockFileEx(impl->handle, LOCKFILE_FAIL_IMMEDIATELY | (exclusive ? LOCKFILE_EXCLUSIVE_LOCK : 0), 0, 1, 0, &ov)) return nullptr;
+  return std::unique_ptr<FileLock>(new FileLock(std::move(impl)));
 }
 
 void init_platform() {
@@ -126,13 +154,51 @@ std::uint64_t available_memory_kb() {
   return 0;
 }
 
+std::uint64_t peak_memory_kb() {
+  std::ifstream in("/proc/self/status");
+  std::string line;
+  while (std::getline(in, line)) {
+    if (line.compare(0, 6, "VmHWM:") == 0) return std::strtoull(line.c_str() + 6, nullptr, 10);
+  }
+  return 0;
+}
+
 bool lock_for_process(const fs::path& file) {
   const int fd = ::open(file.c_str(), O_CREAT | O_RDWR | O_CLOEXEC, 0644);
   return fd >= 0 && ::flock(fd, LOCK_EX | LOCK_NB) == 0;
 }
 
+struct FileLock::Impl {
+  int fd = -1;
+  ~Impl() {
+    if (fd >= 0) ::close(fd);  // releases the lock
+  }
+};
+
+std::unique_ptr<FileLock> FileLock::try_acquire(const fs::path& file, bool exclusive) {
+  auto impl = std::make_unique<Impl>();
+  impl->fd = ::open(file.c_str(), O_CREAT | O_RDWR | O_CLOEXEC, 0644);
+  if (impl->fd < 0) return nullptr;
+  if (::flock(impl->fd, (exclusive ? LOCK_EX : LOCK_SH) | LOCK_NB) != 0) return nullptr;
+  return std::unique_ptr<FileLock>(new FileLock(std::move(impl)));
+}
+
 void init_platform() {}
 #endif
+
+FileLock::FileLock(std::unique_ptr<Impl> impl) : impl_(std::move(impl)) {}
+FileLock::~FileLock() = default;
+
+std::unique_ptr<FileLock> FileLock::acquire(const fs::path& file, bool exclusive, CancelToken& cancel) {
+  for (;;) {
+    if (auto lock = try_acquire(file, exclusive)) return lock;
+    // Distinguish "held" from "cannot be opened": a file that cannot even be created will never be free.
+    std::error_code ec;
+    if (!fs::exists(file, ec) && !std::ofstream(file, std::ios::app)) throw Error(kFailed, "cannot create the lock file " + u8(file));
+    cancel.check();
+    std::this_thread::sleep_for(std::chrono::milliseconds(100));
+  }
+}
 
 std::string sha1_file(const fs::path& file) {
   std::ifstream in(file, std::ios::binary);
