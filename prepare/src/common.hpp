@@ -6,6 +6,7 @@
 #include <cstdint>
 #include <exception>
 #include <filesystem>
+#include <memory>
 #include <stdexcept>
 #include <string>
 
@@ -71,9 +72,32 @@ fs::path from_u8(const std::string& utf8);
 fs::path self_exe();
 // Memory the machine can give to compiler processes now, in KiB; 0 when unknown.
 std::uint64_t available_memory_kb();
+// The highest resident memory this process has used so far, in KiB; 0 when unknown (measurements for the log).
+std::uint64_t peak_memory_kb();
 // Takes an exclusive lock on `file` (created if needed) for the lifetime of the process; false when another
 // process holds it. The lock goes away with the process, whatever the way it ends.
 bool lock_for_process(const fs::path& file);
+// An advisory lock on a file, released by the destructor or when the process ends, however it ends. Shared locks
+// coexist with each other, an exclusive lock with nothing. Used for the toolchain cache (toolchain.hpp): whoever
+// uses an unpacked toolchain holds it shared; whoever unpacks or removes one holds it exclusive.
+class FileLock {
+ public:
+  ~FileLock();
+  FileLock(const FileLock&) = delete;
+  FileLock& operator=(const FileLock&) = delete;
+
+  // nullptr when the lock is held by someone else (or the file cannot be opened).
+  static std::unique_ptr<FileLock> try_acquire(const fs::path& file, bool exclusive);
+  // Waits, polling every 100 ms, until the lock is free; throws Cancelled when `cancel` fires meanwhile and
+  // Error(kFailed) when the file cannot be opened.
+  static std::unique_ptr<FileLock> acquire(const fs::path& file, bool exclusive, CancelToken& cancel);
+
+ private:
+  struct Impl;
+  explicit FileLock(std::unique_ptr<Impl> impl);
+  std::unique_ptr<Impl> impl_;
+};
+
 // Process-wide setup: UTF-8 console output, binary stdout (no CR LF translation on Windows). No-op elsewhere.
 void init_platform();
 

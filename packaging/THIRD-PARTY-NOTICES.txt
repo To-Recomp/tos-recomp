@@ -1,0 +1,57 @@
+Third-party software in the releases of tos-recomp (Linux and Windows)
+=======================================================================
+
+These archives contain no game data and nothing derived from a game: no disc image, no game file, no generated C++,
+no recompiled game executable. The game is built on the player's computer, from the player's own discs, by the
+program tos-prepare. To do that without anything installed by the player, tos-prepare carries a compressed payload
+(the toolkit and a C++ compiler, see docs/RELEASING.md) and unpacks it on first use into the user's cache folder
+(~/.cache/tos-recomp, or %LOCALAPPDATA%\tos-recomp on Windows). Everything below is redistributed unmodified or built
+from unmodified sources, under its own licence. The licence texts are in the folder licenses/ of this archive, so they
+can be read without running anything; they are also inside the payload where noted.
+
+Our own code
+    tos-recomp (tos-prepare, tos-payload, tos-start, the boot harness), To-Recomp/common (disc reading): GPL-3.0-or-later,
+    see LICENSE and the SPDX-License-Identifier line at the top of each source file.
+    gcrecomp (the recompiler and the runtime libraries in toolkit/): MIT, licenses/gcrecomp-LICENSE.txt. It carries
+    portions derived from Pureikyubu (CC0), libogc (zlib licence) and GameCubeRecompiled (CC0), as its README says.
+    The corresponding source of everything above is the repositories github.com/To-Recomp/tos-recomp, .../common and
+    .../gcrecomp at the revisions recorded in toolkit/toolkit.json (versions) and printed by tos-prepare --version.
+    Combining these in one program is allowed: MIT, zlib, BSD and Apache-2.0 code may be part of a GPL-3.0 work.
+
+Zig  (inside the payload, toolchain/zig; MIT licence: licenses/Zig-LICENSE.txt)
+    The C++ compiler tos-prepare runs on the player's computer ("zig c++"), and the compiler that built the libraries
+    of the toolkit. An unmodified release from https://ziglang.org/download/ of which the pinned version and SHA-256 are
+    in packaging/zig.pin of the tos-recomp source; some folders that the release never uses (the C libraries of other
+    operating systems, documentation, sanitizer sources) are removed, nothing else is changed (scripts/trim-zig.sh).
+    It is a separate program that tos-prepare starts; the two are not linked. It contains, under their own licences:
+      - LLVM, Clang, lld, libc++, libc++abi, libunwind (Apache License 2.0 with LLVM Exceptions):
+        licenses/LLVM-libcxx-LICENSE.txt, LLVM-libcxxabi-LICENSE.txt, LLVM-libunwind-LICENSE.txt. The C++ library libc++
+        is compiled into the game executable that is built on the player's computer (static link); the LLVM Exception
+        allows that without attribution in the binary.
+      - compiler-rt and the start-up code, written in Zig (MIT, as Zig itself).
+      - Linux release: the glibc headers and the sources of the small library stubs Zig builds for the target (GNU C
+        Library: LGPL-2.1-or-later with exceptions, licenses/glibc-LICENSES.txt). The game executable is linked
+        dynamically against the glibc of the player's system, so no part of glibc is distributed as a library.
+      - Windows release: the mingw-w64 runtime and headers (public domain, ZPL-2.1 and BSD-style notices per file:
+        licenses/mingw-w64-COPYING.txt).
+    Source: https://github.com/ziglang/zig at the pinned version.
+
+SDL3  (built from source release 3.2.28 and linked statically into the game executable: toolkit/lib/libSDL3.a,
+    inside the payload; zlib licence: licenses/SDL3-LICENSE.txt)
+    Copyright (C) 1997-2025 Sam Lantinga. Source: https://github.com/libsdl-org/SDL, tag release-3.2.28.
+    On Linux SDL3 opens the system's X11, Wayland, ALSA, PulseAudio, OpenGL ... libraries with dlopen at run time when
+    they exist; none is distributed or linked.
+
+Disc codecs inside tos-prepare (statically linked), to read compressed disc images and the payload:
+    zlib      (zlib licence)
+    bzip2     (bzip2 licence, BSD-style)
+    liblzma   (xz; public domain)
+    zstd      (BSD licence)
+    Their licence files are in licenses/ (copied from the packages that provided them in the build).
+
+tomlplusplus  (MIT, compiled into tos-prepare through To-Recomp/common)
+    Copyright (c) Mark Gillard.
+
+C++ runtime of tos-prepare
+    Linux: libstdc++ and libgcc are linked statically (GNU GPL-3.0 with the GCC Runtime Library Exception).
+    Windows: the Microsoft Visual C++ runtime is linked statically; nothing needs to be installed.

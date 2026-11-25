@@ -31,6 +31,7 @@ struct Toolkit {
   std::string std_flag;
   std::vector<std::string> compilers;  // candidates, in order of preference
   std::string executable;
+  bool compiler_env = true;  // may $CXX replace the candidates (false when the libraries need the bundled compiler)
 
   // Loads <dir>/toolkit.json and checks that every file it names exists; throws Error(kNoToolchain).
   // `symbols_dir` / `dumps_override`, when not empty, replace the toolkit's own copies.
@@ -41,9 +42,12 @@ struct Toolkit {
   std::string content_hash() const;
 };
 
-// Compiler command: --compiler, else $CXX, else the first candidate that exists: a candidate is looked up on
-// PATH, and "{program_dir}" in a word stands for the folder holding tos-prepare (how the Windows release
-// names its bundled Zig). Returns argv (a command such as "zig c++" has several words); throws Error(kNoToolchain).
-std::vector<std::string> resolve_compiler(const Toolkit& tk, const std::string& requested, const fs::path& program_dir);
+// Compiler command: --compiler, else $CXX (unless the toolkit says its libraries need their own compiler, see
+// `build.compiler_env`), else the first candidate that exists: a candidate is looked up on PATH, and "{root}" in a
+// word stands for the folder holding toolkit/ and toolchain/ (how a release names its bundled Zig). Returns argv (a
+// command such as "zig c++" has several words); throws Error(kNoToolchain). `ignored_cxx` receives $CXX when it
+// was set and not used.
+std::vector<std::string> resolve_compiler(const Toolkit& tk, const std::string& requested, const fs::path& root,
+                                          std::string* ignored_cxx = nullptr);
 
 }  // namespace prep

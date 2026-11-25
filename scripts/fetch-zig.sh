@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# Download and unpack the pinned Zig release (packaging/windows/zig.pin), checking its SHA-256.
-# Zig (MIT licence) is what the Windows archive bundles as the C++ compiler, and what builds the runtime
+# Download and unpack the pinned Zig release (packaging/zig.pin), checking its SHA-256.
+# Zig (MIT licence) is what the releases carry as the C++ compiler, and what builds the runtime
 # libraries it contains (docs/RELEASING.md). Works on Linux and, under Git Bash, on Windows.
 #
 #   scripts/fetch-zig.sh --host x86_64-windows|x86_64-linux --out DIR [--check-index]
@@ -14,7 +14,7 @@
 set -euo pipefail
 
 here="$(cd "$(dirname "$0")/.." && pwd)"
-pin="$here/packaging/windows/zig.pin"
+pin="$here/packaging/zig.pin"
 host=; out=; cache=; check_index=0
 while [ $# -gt 0 ]; do
   case "$1" in

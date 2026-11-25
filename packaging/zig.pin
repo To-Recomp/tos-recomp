@@ -1,4 +1,4 @@
-# The Zig release the Windows archive bundles and that builds its runtime libraries (scripts/fetch-zig.sh).
+# The Zig release both archives carry (packed in tos-prepare) and that builds their toolkit (scripts/fetch-zig.sh).
 # One line per host: <host> <sha256> <size in bytes> <url>; then `mirror <base url>` lines. The values are the ones in
 # https://ziglang.org/download/index.json for this version; `scripts/fetch-zig.sh --check-index` compares them
 # with the live index. To move to another Zig: change the lines from index.json, then run the release workflow.

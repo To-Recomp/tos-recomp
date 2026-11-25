@@ -4,7 +4,7 @@
 # Everything in it is ours; nothing is derived from the game, so it may be shipped.
 #
 #   scripts/make-toolkit.sh --gcrecomp DIR --out DIR [--build DIR] [--jobs N] [--no-build] [--fetch-sdl3]
-#                           [--windows --zig PATH]
+#                           [--zig PATH --target TRIPLE]
 #
 #   --gcrecomp DIR  a gcrecomp checkout (default: ../gcrecomp next to this repository)
 #   --out DIR       the toolkit folder to create (replaced if it exists)
@@ -12,19 +12,24 @@
 #                   built unless --no-build is given (use that to reuse an existing build)
 #   --jobs N        build parallelism (default 4)
 #   --fetch-sdl3    build SDL3 from source for the headers the libraries are compiled against (a machine without
-#                   SDL3 development files, such as CI). The toolkit still links the player's own SDL3 (-lSDL3).
-#   --windows       build the toolkit of the Windows release: everything is compiled with Zig (--zig PATH, the zig
-#                   executable) for x86_64-windows-gnu, from any host that runs Zig; SDL3 is built from source
-#                   and linked statically into the libraries' link line, so the player needs no SDL3.
-#                   The toolkit names the bundled compiler as {program_dir}/toolchain/zig/zig (docs/PREPARE.md).
+#                   SDL3 development files). Without --zig the toolkit still links the machine's own SDL3 (-lSDL3).
+#   --zig PATH      build the toolkit of a RELEASE: everything is compiled with this Zig (the zig executable) for
+#                   --target, from any host that runs Zig; SDL3 is built from source and linked statically into the
+#                   game, so nothing has to be installed where the game is built or played. The toolkit names the
+#                   compiler that ships in the release, {root}/toolchain/zig/zig, and refuses $CXX (its libraries
+#                   are built with Zig's libc++, which another compiler's C++ library does not mix with).
+#   --target TRIPLE with --zig: x86_64-windows-gnu, or x86_64-linux-gnu.<oldest glibc to run on>, e.g. x86_64-linux-gnu.2.31
+#                   (packaging/zig-toolchain.cmake). On Linux SDL3 loads X11, Wayland, ALSA, PulseAudio ... with dlopen at
+#                   run time: the machine that builds needs their HEADERS (CI installs them), the player's machine
+#                   needs nothing. The result is checked for that: see tests/check-linux-game.sh.
 #
-# The toolkit's libraries are compiled by the compiler CMake picks here. A player's compiler must use
-# the same C++ standard library (libstdc++ with gcc or clang on Linux), see docs/PREPARE.md.
+# Without --zig the libraries are compiled by the compiler CMake picks here, and a player's compiler must use the same
+# C++ standard library (libstdc++ with gcc or clang on Linux): a development toolkit.
 set -euo pipefail
 
 here="$(cd "$(dirname "$0")/.." && pwd)"
 gcrecomp="$here/../gcrecomp"; out=; build="${TMPDIR:-/var/tmp}/gcrecomp-toolkit-build"; jobs=4; do_build=1; fetch_sdl3=OFF
-windows=0; zig=; PYTHON="${PYTHON:-python3}"
+zig=; target=; PYTHON="${PYTHON:-python3}"
 while [ $# -gt 0 ]; do
   case "$1" in
     --gcrecomp) gcrecomp="$2"; shift 2 ;;
@@ -33,9 +38,9 @@ while [ $# -gt 0 ]; do
     --jobs) jobs="$2"; shift 2 ;;
     --fetch-sdl3) fetch_sdl3=ON; shift ;;
     --no-build) do_build=0; shift ;;
-    --windows) windows=1; shift ;;
     --zig) zig="$2"; shift 2 ;;
-    -h|--help) sed -n '2,22p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    --target) target="$2"; shift 2 ;;
+    -h|--help) sed -n '2,29p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
     *) echo "unknown option $1" >&2; exit 2 ;;
   esac
 done
@@ -44,16 +49,23 @@ done
 gcrecomp="$(cd "$gcrecomp" && pwd)"
 # Windows tools (CMake, Zig) want C:/... paths; under Git Bash `pwd` gives /c/...
 native() { if command -v cygpath >/dev/null 2>&1; then cygpath -m "$1"; else echo "$1"; fi; }
-if [ "$windows" = 1 ]; then
-  [ -n "$zig" ] && [ -f "$zig" ] || { echo "--windows needs --zig PATH (the zig executable; scripts/fetch-zig.sh)" >&2; exit 2; }
-  exe=.exe; fetch_sdl3=ON
-  export TOS_ZIG="$(native "$(cd "$(dirname "$zig")" && pwd)/$(basename "$zig")")"
-else
-  exe=
+windows=0; linux_zig=0; exe=
+if [ -n "$zig" ]; then
+  [ -f "$zig" ] || { echo "no zig executable at $zig (scripts/fetch-zig.sh)" >&2; exit 2; }
+  case "$target" in
+    x86_64-windows-gnu) windows=1; exe=.exe ;;
+    x86_64-linux-gnu.*) linux_zig=1 ;;
+    *) echo "--zig needs --target x86_64-windows-gnu or x86_64-linux-gnu.<glibc version>" >&2; exit 2 ;;
+  esac
+  fetch_sdl3=ON
+  export TOS_ZIG="$(native "$(cd "$(dirname "$zig")" && pwd)/$(basename "$zig")")" TOS_ZIG_TARGET="$target"
+elif [ -n "$target" ]; then
+  echo "--target needs --zig" >&2; exit 2
 fi
+with_zig=$((windows + linux_zig))
 
 toolchain=()
-[ "$windows" = 1 ] && toolchain=(-DCMAKE_TOOLCHAIN_FILE="$(native "$here/packaging/windows/zig-toolchain.cmake")")
+[ "$with_zig" = 1 ] && toolchain=(-DCMAKE_TOOLCHAIN_FILE="$(native "$here/packaging/zig-toolchain.cmake")")
 if [ "$do_build" = 1 ]; then
   cmake -S "$(native "$gcrecomp")" -B "$(native "$build")" -G Ninja -DCMAKE_BUILD_TYPE=Release "${toolchain[@]}" \
     -DGCRECOMP_BUILD_EXAMPLE=OFF -DGCRECOMP_BUILD_TESTS=OFF -DBUILD_TESTING=OFF -DGCRECOMP_FETCH_SDL3="$fetch_sdl3" >/dev/null
@@ -62,7 +74,7 @@ fi
 libs=(gcrecomp_gp gcrecomp_runtime gcrecomp_gx gcrecomp_audio gcrecomp_input)
 for l in "${libs[@]}"; do [ -f "$build/lib$l.a" ] || { echo "missing $build/lib$l.a (build first)" >&2; exit 1; }; done
 [ -f "$build/gcrecomp_recompiler$exe" ] || { echo "missing $build/gcrecomp_recompiler$exe" >&2; exit 1; }
-if [ "$windows" = 1 ]; then
+if [ "$with_zig" = 1 ]; then
   [ -f "$build/_deps/sdl3-build/libSDL3.a" ] || { echo "missing the SDL3 static library in $build/_deps/sdl3-build" >&2; exit 1; }
 fi
 
@@ -70,10 +82,11 @@ rm -rf "$out"
 mkdir -p "$out/bin" "$out/lib" "$out/include" "$out/src" "$out/symbols"
 cp "$build/gcrecomp_recompiler$exe" "$out/bin/"
 for l in "${libs[@]}"; do cp "$build/lib$l.a" "$out/lib/"; done
-if [ "$windows" = 1 ]; then
+mkdir -p "$out/licenses"
+cp "$gcrecomp/LICENSE" "$out/licenses/gcrecomp-LICENSE.txt"
+if [ "$with_zig" = 1 ]; then
   # SDL3 (zlib licence) is linked statically into the game: ship its library and its licence text.
   cp "$build/_deps/sdl3-build/libSDL3.a" "$out/lib/"
-  mkdir -p "$out/licenses"
   cp "$build/_deps/sdl3-src/LICENSE.txt" "$out/licenses/SDL3-LICENSE.txt"
 fi
 cp -r "$gcrecomp/include/gcrecomp" "$out/include/"
@@ -89,14 +102,18 @@ if [ "$windows" = 1 ]; then
   # D3D11/XAudio2 backends this game does not use and whose import libraries Zig does not ship), then the linker's
   # stack size: the game runs deep recursion on the main thread, as `ulimit -s unlimited` allows on Linux.
   sys_libs="-lm -lkernel32 -luser32 -lgdi32 -lwinmm -limm32 -lole32 -loleaut32 -lversion -luuid -ladvapi32 -lsetupapi -lshell32 -ldinput8 -lxinput1_4 -Wl,--stack,536870912"
+elif [ "$linux_zig" = 1 ]; then
+  # The static SDL3 opens libX11, libwayland-client, libasound, libpulse, libGL ... itself with dlopen: nothing but the
+  # C library is linked (glibc 2.31 keeps dlopen in libdl and threads in libpthread).
+  sys_libs="-lm -ldl -lpthread"
 else
   sys_libs=$(pkg-config --libs sdl3 2>/dev/null || echo "-lSDL3")
 fi
 
-"$PYTHON" - "$out" "$(rev "$gcrecomp")$(dirty "$gcrecomp")" "$(rev "$here")$(dirty "$here")" "$sys_libs" "$windows" <<'PY'
+"$PYTHON" - "$out" "$(rev "$gcrecomp")$(dirty "$gcrecomp")" "$(rev "$here")$(dirty "$here")" "$sys_libs" "$windows" "$linux_zig" "$target" <<'PY'
 import json, sys
-out, gcrecomp_rev, tos_rev, sys_libs, windows = sys.argv[1:6]
-windows = windows == "1"
+out, gcrecomp_rev, tos_rev, sys_libs, windows, linux_zig, target = sys.argv[1:8]
+windows, linux_zig = windows == "1", linux_zig == "1"
 libs = ["gcrecomp_gp", "gcrecomp_runtime", "gcrecomp_gx", "gcrecomp_audio", "gcrecomp_input"]
 tk = {
     "format": 1,
@@ -109,12 +126,16 @@ tk = {
         "include": ["include"],
         "sources": ["src/main.cpp"],
         "std": "gnu++20",
-        "flags": ["-O1", "-w"],
-        "libs": ["lib/lib%s.a" % l for l in libs] + (["lib/libSDL3.a"] if windows else []),
+        # Zig's clang writes debug information unless told not to: -g0 makes the objects of the real game 6 times
+        # smaller (15.7 MB instead of 94 MB for the biggest file) and the compiler 45% leaner (1.4 GB instead of 2.6 GB).
+        "flags": ["-O1", "-w"] + (["-g0"] if windows or linux_zig else []),
+        "libs": ["lib/lib%s.a" % l for l in libs] + (["lib/libSDL3.a"] if windows or linux_zig else []),
         # Linked after the libraries (not used when compiling): system libraries, then linker options.
-        "system_libs": sys_libs.split() + ([] if windows else ["-pthread"]),
-        # {program_dir}: the folder of tos-prepare, where the Windows archive keeps its bundled Zig.
-        "compilers": (["{program_dir}/toolchain/zig/zig c++ -target x86_64-windows-gnu"] if windows else []) + ["clang++", "g++", "c++"],
+        "system_libs": sys_libs.split() + ([] if windows or linux_zig else ["-pthread"]),
+        # {root}: the folder holding toolkit/ and toolchain/ (tos-prepare's unpacked payload). A release names only its
+        # bundled Zig and refuses $CXX: the libraries above are built with Zig's libc++.
+        "compilers": ["{root}/toolchain/zig/zig c++ -target " + target] if windows or linux_zig else ["clang++", "g++", "c++"],
+        "compiler_env": not (windows or linux_zig),
         "executable": "tos_boot" + (".exe" if windows else ""),
     },
     # How to start the game, relative to the instance folder. The harness takes <main.dol> <files> <seconds>;
