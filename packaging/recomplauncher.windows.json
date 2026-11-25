@@ -5,13 +5,13 @@
     {
       "id": "disc1",
       "role": "disc",
-      "label": "Checking the discs and building the game on this computer (takes a while; nothing to install)",
+      "label": "Disc 1",
       "formats": [{ "type": "file", "extensions": ["iso", "gcm", "ciso", "gcz", "rvz", "wia"] }]
     },
     {
       "id": "disc2",
       "role": "disc",
-      "label": "Checking the discs and building the game on this computer (takes a while; nothing to install)",
+      "label": "Disc 2",
       "formats": [{ "type": "file", "extensions": ["iso", "gcm", "ciso", "gcz", "rvz", "wia"] }]
     }
   ],
