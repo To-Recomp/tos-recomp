@@ -40,7 +40,7 @@ The rule behind it: **nothing derived from a game is distributed** (no generated
 For every build, pull requests too (`.github/workflows/release.yml`):
 
 - **Linux**: the archive is built on `ubuntu-22.04` with the packages of `packaging/linux-build-deps.txt`; `tos-prepare` has no libz, libbz2, liblzma, libzstd or libstdc++ dependency; the archive holds one `tos-prepare` and no `toolkit/` or `toolchain/` folder; nothing game-derived is in it. Then `tests/release-smoke.sh` runs the **real, single-file** `tos-prepare`, mounted read-only, in plain `ubuntu:22.04` and `debian:stable-slim` containers started with `--network none` and holding **no** C or C++ compiler (the script checks `cc c++ gcc g++ clang clang++ zig tcc` are not on PATH), on two **synthetic** disc images (`tos-synth-discs`, `prepare/tests/synth_discs.cpp`; the `main.dol` has four instructions): first run unpacks the payload into `$HOME/.cache/tos-recomp`, verifies the discs, extracts, runs the real recompiler, compiles the generated code and the real boot harness with the Zig from the payload, links against the shipped libraries and SDL3, and the game executable starts, runs the synthetic program and exits 0; `ldd` shows only the C library; a second run (`--resume`) skips every stage; deleting the cache makes the next run unpack again; deleting one file of the cache makes the next run repair it. On the build machine `tests/check-linux-game.sh` checks with `readelf` that the executable asks for no library beyond the C library and for no glibc symbol newer than 2.31.
-- **Windows**: the same on a `windows-latest` runner, with the runner's compilers removed from PATH (Git Bash's own tools only), unpacking into `%LOCALAPPDATA%`: `tos-prepare.exe` from the unpacked zip, no toolkit or toolchain folder beside it, MSVC-built, static runtime, no DLL beyond the system's.
+- **Windows** (passed on `windows-latest` for this change): the same on the runner, with the runner's compilers removed from PATH (Git Bash's own tools only), unpacking into `%LOCALAPPDATA%`: `tos-prepare.exe` from the unpacked zip, no toolkit or toolchain folder beside it, MSVC-built, static runtime, no DLL beyond the system's.
 - Offline operation is proved on Linux (`--network none`). The Windows runner is online; nothing in the payload code or in Zig's use here opens a connection (**[INFERENCE]**, not observed).
 
 **Not proved by it**: that the real game (a 2.9 MB DOL: 98 MB of generated C++) compiles within the time and memory expected on every machine (it was compiled on the development machine only: see the numbers below), and that it plays: OpenGL 3.3 window through SDL3, audio, keyboard and pads, frame rate. Nobody has run the Zig-built game on a Steam Deck or on real Windows hardware; an old distribution whose glibc is below 2.35 cannot run `tos-prepare` itself (**not tried**).
@@ -56,14 +56,15 @@ Unverified (the first player or the owner will find out):
 
 ### Sizes and times
 
-Measured on the development machine (Ryzen 7 9800X3D, 16 threads, NVMe, a desktop in use; Docker with 4 CPUs for the builds) with the Linux archive built by `scripts/docker-release.sh` from this change (Zig 0.17.1), the first release candidate that carries a payload being not yet published:
+Linux numbers measured on the development machine (Ryzen 7 9800X3D, 16 threads, NVMe, a desktop in use; Docker with 4 CPUs for the builds) with the Linux archive built by `scripts/docker-release.sh` from this change (Zig 0.17.1), Windows numbers from the CI run of the pull request:
 
 | | Before (rc.5, system compiler) | Self-contained |
 | --- | --- | --- |
 | Linux archive (`.tar.gz`) | 1.6 MB | **53.3 MB** (`tos-prepare` 54.7 MB: 2.5 MB program + 52.3 MB payload) |
-| Windows archive (`.zip`) | 111 MB (379 MB unpacked: Zig and toolkit next to the program) | **not measured here** (no Windows machine): about 100 MB for Zig's tree, trimmed and xz-packed it should be a little over 50 MB **[INFERENCE]**, CI prints the real size in the job summary |
+| Windows archive (`.zip`) | 111 MB (379 MB unpacked: Zig and toolkit next to the program) | **54.3 MB** (`tos-prepare.exe` 54.9 MB; GitHub `windows-latest`, run of this change) |
 | Payload, unpacked (Linux) | | 299.8 MB: Zig trimmed 254 MB (407 MB before trimming) + toolkit 49 MB; 304 MB on disk |
 | First-run unpack (Linux, `tos-prepare` log) | | 2.3 s, peak memory of the process 74 MB (warm page cache, NVMe; a slow SD card will be bound by writing 300 MB: **not measured**) |
+| Windows payload (CI runner) | | 347.1 MB unpacked (Zig trimmed 316 MB: 82 MB removed; toolkit 29 MB) from 53.4 MB; first-run unpack 8.6 s, peak memory 78.5 MB, 353 MB on disk; the whole first run of the synthetic game (compile with Zig included, 2 jobs) 163 s; packaging on the runner 25 min (mostly building the toolkit with Zig) |
 | Later runs | | 0 s: one `stat` per file of the cache |
 | Zig's libc++ for the target | | built by Zig on the first compile of an instance, 7 s |
 | Synthetic game, whole first run in a container, 2 jobs | | 12-13 s (unpack 2.3 s, compile stage 9.6 s) |
