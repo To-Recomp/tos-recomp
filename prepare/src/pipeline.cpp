@@ -81,6 +81,14 @@ int run_pipeline(Context& ctx, std::vector<std::unique_ptr<Stage>>& stages, cons
   auto seconds_since = [](std::chrono::steady_clock::time_point t) {
     return std::chrono::duration<double>(std::chrono::steady_clock::now() - t).count();
   };
+  // The release the discs were found to be, once the verify stage has run (or was kept by --resume).
+  auto announce_release = [&](const Stage& s) {
+    if (s.name() != "verify") return;
+    const StageRecord* v = ctx.state.find("verify");
+    if (!v) return;
+    const std::string id = v->info.get("release").str();
+    if (!id.empty()) rep.release(id, v->info.get("status").str("unsupported"), v->info.get("title").str());
+  };
 
   try {
     ctx.state.overall = "preparing";
@@ -98,6 +106,7 @@ int run_pipeline(Context& ctx, std::vector<std::unique_ptr<Stage>>& stages, cons
       const bool finished_before = rec && rec->status == "done" && rec->input == hash;
       if (ctx.opt.resume && finished_before && stage->outputs_intact(ctx)) {
         rep.stage_end("skipped", 0);
+        announce_release(*stage);
         base += span;
         continue;
       }
@@ -129,6 +138,7 @@ int run_pipeline(Context& ctx, std::vector<std::unique_ptr<Stage>>& stages, cons
       done.seconds = seconds_since(started);
       ctx.state.save();
       rep.stage_end("ok", done.seconds);
+      announce_release(*stage);
       base += span;
     }
     current = nullptr;

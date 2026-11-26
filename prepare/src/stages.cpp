@@ -206,6 +206,7 @@ class VerifyStage : public Stage {
     ctx.state.at(name()).info = std::move(info);
     ctx.state.meta["game_id"] = plan_->toolkit.game_id;
     ctx.state.meta["release"] = found[0].id.release->title;
+    ctx.state.meta["release_id"] = found[0].id.release->id;
     ctx.state.meta["status"] = status;
   }
 

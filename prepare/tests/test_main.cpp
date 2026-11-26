@@ -523,6 +523,8 @@ static void test_end_to_end() {
   CliResult r1 = run_cli(base_args(d, data, tk));
   CHECK_EQ(r1.exit, 0);
   CHECK(r1.has("protocol 1 tos-prepare "));
+  CHECK(r1.has("release test alpha Test Game"));  // which release the discs were found to be
+  CHECK_EQ(Json::parse(slurp(data / "prepare.json")).get("release_id").str(), std::string("test"));
   CHECK_EQ(stage_names(r1, "ok").size(), std::size_t(5));
   CHECK_EQ(r1.lines.back().compare(0, 15, "result ready 0 "), 0);
   // stage order
@@ -534,7 +536,7 @@ static void test_end_to_end() {
   for (const auto& l : r1.lines) {
     const bool known = l.compare(0, 9, "protocol ") == 0 || l.compare(0, 12, "stage-start ") == 0 || l.compare(0, 15, "stage-progress ") == 0 ||
                        l.compare(0, 9, "progress ") == 0 || l.compare(0, 10, "stage-end ") == 0 || l.compare(0, 5, "warn ") == 0 ||
-                       l.compare(0, 7, "result ") == 0;
+                       l.compare(0, 7, "result ") == 0 || l.compare(0, 8, "release ") == 0;
     CHECK(known);
     if (l.compare(0, 9, "progress ") == 0) {
       const double v = std::atof(l.c_str() + 9);

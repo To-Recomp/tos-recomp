@@ -91,6 +91,7 @@ stage-progress extract 734003200/2919956480 Copying the files of disc 1     (don
 progress 0.167 Copying the files of disc 1        overall 0..1, the launcher's own `progress <fraction> <text>` format
 stage-end extract ok 41.3                         ok | skipped | failed | cancelled, seconds
 warn <text>
+release <id> <status> <title>                     which release the discs were found to be (after the verify stage, also when `--resume` keeps it); additive, the launcher ignores it
 result ready 0 the game is prepared in <dir>      ready | failed | cancelled, exit code, text
 ```
 
@@ -149,7 +150,7 @@ Consistent with `launcher/docs/library.md`: the launcher's instance has `instanc
   .prepare.lock
 ```
 
-`prepare.json` has what the launcher needs: `state`; per-stage `status/input/seconds/info`; `discs` (disc number, level `redump-verified|compatible|unverified`, status `stable|beta|alpha|unsupported` (the release's own; `unsupported` for an image that is not a known dump), content_sha1); `versions` (`gcrecomp`, `tos_recomp` commits from the toolkit, `toolkit_sha1`, `symbols_sha1`, `recompiler_sha1`, `compiler`, `tos_prepare`); `run` (`exe`, `args`, `env`, `unlimited_stack`, relative to `{data}`); `paths`. The launcher's `needs rebuild` is `tos-prepare --check` (or comparing `versions` with the new release); the launcher's `prepare.keeps_copy` is `game/`.
+`prepare.json` has what the launcher needs: `state`; `release_id`, `release` (title) and `status` of the release the discs were found to be; per-stage `status/input/seconds/info`; `discs` (disc number, level `redump-verified|compatible|unverified`, status `stable|beta|alpha|unsupported` (the release's own; `unsupported` for an image that is not a known dump), content_sha1); `versions` (`gcrecomp`, `tos_recomp` commits from the toolkit, `toolkit_sha1`, `symbols_sha1`, `recompiler_sha1`, `compiler`, `tos_prepare`); `run` (`exe`, `args`, `env`, `unlimited_stack`, relative to `{data}`); `paths`. The launcher's `needs rebuild` is `tos-prepare --check` (or comparing `versions` with the new release); the launcher's `prepare.keeps_copy` is `game/`.
 
 Start line the launcher should use (relative to `{data}`; `unlimited_stack` means `ulimit -s unlimited`, which `scripts/run.sh` also does): `bin/tos_boot game/sys/main.dol game/files 86400` with `GCRECOMP_CARD_IMAGE=saves/card-a.raw`. The harness's third argument is a number of seconds, there is no "forever" yet (an open point: the harness is a development tool, the final game executable is a later step).
 
