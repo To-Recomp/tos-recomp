@@ -94,7 +94,7 @@ struct Discs {
   std::string dumps;
 };
 
-static Discs make_discs(const fs::path& dir) {
+static Discs make_discs(const fs::path& dir, std::size_t big_file = 0) {
   synth::Node t1, t2, other;
   synth::add_file(t1, "shared/a.bin", std::string(3000, 'a'));
   synth::add_file(t1, "shared/b.bin", "bbb");
@@ -102,6 +102,7 @@ static Discs make_discs(const fs::path& dir) {
   synth::add_file(t1, "opening.bnr", "banner one");
   synth::add_file(t1, "only1.bin", "only on disc one");
   t2 = t1;
+  if (big_file) synth::add_file(t1, "big.bin", std::string(big_file, 'z'));  // disc 1 only
   t2.kids.erase("only1.bin");
   synth::add_file(t2, "opening.bnr", "banner two");
   synth::add_file(t2, "ev/only2.bin", std::string(5000, 'e'));
@@ -751,9 +752,12 @@ static void test_cancel() {
 }
 
 static void test_cancel_during_extract() {
-  // Cancel while the discs are being copied: the cancel file exists from the start of the stage.
+  // Cancel while the discs are being copied. tos-prepare is a child process and the cancel file is written by this
+  // process after it reads "stage-start extract", so the extraction must take much longer than that round trip:
+  // disc 1 carries a large file (a few KB would be copied before the file even exists, and the stage would end
+  // first). The file exists from the start of the stage, so the first progress tick of the copy sees it.
   Temp t;
-  const Discs d = make_discs(t.dir);
+  const Discs d = make_discs(t.dir, std::size_t(128) << 20);
   const fs::path tk = make_toolkit(t.dir, d.dumps);
   const fs::path cancel_file = t.dir / "cancel";
   const fs::path inst = t.dir / "inst";
