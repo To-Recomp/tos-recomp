@@ -42,11 +42,11 @@ serial = "DL-DOL-GQSF-1-FRA"
 sha1 = "d66b673c9979be546c2253b5de96337981273335"
 content_sha1 = "a3c22ec688780cf92162953623358f18b9f515c1"
 
-# The releases below are listed from Redump (serial, entry, size, whole-image SHA-1) so that tos-prepare can name
-# them. None has a content_sha1 yet (it needs a verified image: `torecomp-disc manifest <disc.iso>`), none has
-# symbols or a recompile: the code and symbols of this build are those of the French release (GQSF). Whether their
-# main.dol and .rel files equal the French ones is not known. `version` is assumed 0 (the header byte is not
-# in Redump's page): an image with another version byte is not matched by its header.
+# The releases below come from Redump (serial, entry, size, whole-image SHA-1); their content_sha1 were computed
+# (scripts/disc-hashes.sh) from images whose whole-image SHA-1 equals the Redump one, read as ISO, 7z (Japan) and RVZ
+# (USA). Every header has version 0. None has symbols or a recompile: unlike the French release, each has its own
+# main.dol (all different from the French one, as are all their .rel files), so the code and symbols of this build
+# (GQSF) do not apply to them. They stay unsupported until someone tests them.
 
 [[release]]
 id = "gqse"
@@ -65,6 +65,7 @@ title = "Tales of Symphonia (USA) (Disc 1)"
 redump_id = 1279
 serial = "DL-DOL-GQSE-0-USA"
 sha1 = "99d8668e9badd485879b7374339ddd9e1ffc80b6"
+content_sha1 = "61529bb5f7639b3fbe671e6301338dfc936fa9d8"
 
 [[release.disc]]
 game_id = "GQSE"
@@ -75,6 +76,7 @@ title = "Tales of Symphonia (USA) (Disc 2)"
 redump_id = 1280
 serial = "DL-DOL-GQSE-1-USA"
 sha1 = "b069c1d6cff7364230c5730c4cb513cab896ed63"
+content_sha1 = "3f7e1267d8c1d6075e9b4d3d8f3bb189403de68d"
 
 [[release]]
 id = "gtoj"
@@ -93,6 +95,7 @@ title = "Tales of Symphonia (Japan) (Disc 1)"
 redump_id = 5383
 serial = "DL-DOL-GTOJ-0-JPN"
 sha1 = "e3dcaf683a21a14ed406db0f4e7bba464a17fe0a"
+content_sha1 = "46d617d831c3b201104eb5f91a7a05bac712d8fb"
 
 [[release.disc]]
 game_id = "GTOJ"
@@ -103,6 +106,7 @@ title = "Tales of Symphonia (Japan) (Disc 2)"
 redump_id = 5384
 serial = "DL-DOL-GTOJ-1-JPN"
 sha1 = "36aba753b7729f75705b8a04f0bf0a5f7fd83d51"
+content_sha1 = "0b6548956dafc6cdb93c8c2d7252faf90c0c20ee"
 
 [[release]]
 id = "gqsd"
@@ -121,6 +125,7 @@ title = "Tales of Symphonia (Germany) (Disc 1)"
 redump_id = 5079
 serial = "DL-DOL-GQSD-0-NOE"
 sha1 = "38ac71a99713119025d5b80dadaa5cf710b73830"
+content_sha1 = "5ce6a00027c547105d5595ca309169f059304565"
 
 [[release.disc]]
 game_id = "GQSD"
@@ -131,6 +136,7 @@ title = "Tales of Symphonia (Germany) (Disc 2)"
 redump_id = 5080
 serial = "DL-DOL-GQSD-1-NOE"
 sha1 = "5f1dafa0ddf231ecbf679ea1b87e4c839803a663"
+content_sha1 = "a8a8c889a551bddffb6cb97c8d551998e668ce62"
 
 [[release]]
 id = "gqsi"
@@ -149,6 +155,7 @@ title = "Tales of Symphonia (Italy) (Disc 1)"
 redump_id = 24749
 serial = "DL-DOL-GQSI-0-ITA"
 sha1 = "ed8d2fcf8e9ff1658bd27fce31a41f1940281d9f"
+content_sha1 = "d5fc1c40f8a162c3b18915ec974d3e5cb750a3ef"
 
 [[release.disc]]
 game_id = "GQSI"
@@ -159,6 +166,7 @@ title = "Tales of Symphonia (Italy) (Disc 2)"
 redump_id = 24750
 serial = "DL-DOL-GQSI-1-ITA"
 sha1 = "54419b0edba98fc85ebc07e74594caa2db4add87"
+content_sha1 = "9bcdb72e5030d08975f52fdd2c95876fa978c9b2"
 
 [[release]]
 id = "gqsp"
@@ -177,6 +185,7 @@ title = "Tales of Symphonia (United Kingdom) (Disc 1)"
 redump_id = 9482
 serial = "DL-DOL-GQSP-0-UKV"
 sha1 = "7d8f0e31d7226f70b0810622e8a455c4e4fc6a2a"
+content_sha1 = "22d8ffb49e0a2d3125d86816b6529ee823ec5a33"
 
 [[release.disc]]
 game_id = "GQSP"
@@ -187,6 +196,7 @@ title = "Tales of Symphonia (United Kingdom) (Disc 2)"
 redump_id = 9483
 serial = "DL-DOL-GQSP-1-UKV"
 sha1 = "74636b61d1ee02e46b8e927265ee5329a4860990"
+content_sha1 = "44374e04fa3e7fc5ed426cee278c976325a96fb9"
 
 [[release]]
 id = "gqss"
@@ -205,6 +215,7 @@ title = "Tales of Symphonia (Spain) (Disc 1)"
 redump_id = 21427
 serial = "DL-DOL-GQSS-0-ESP"
 sha1 = "c5b22d4feab05f54a50c5e7bd22ca78525d01bf2"
+content_sha1 = "4f2ccad6430fef123f10b1f9edc77af05988ec9f"
 
 [[release.disc]]
 game_id = "GQSS"
@@ -215,3 +226,4 @@ title = "Tales of Symphonia (Spain) (Disc 2)"
 redump_id = 21428
 serial = "DL-DOL-GQSS-1-ESP"
 sha1 = "0d51d99a86177795e2347d17986da5c03c81f9a6"
+content_sha1 = "978f1a6a97a2890411ac981b9927e027e2f199ed"

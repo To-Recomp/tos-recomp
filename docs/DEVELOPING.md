@@ -26,6 +26,8 @@ common/build/torecomp-disc extract tos-recomp/dumps.toml disc1.iso tos-recomp/ex
 
 This verifies the dump (two levels, see `common/README.md`) and writes `sys/main.dol` and `files/`. A scrubbed dump is reported as "Compatible", which is fine.
 
+To add a release to `dumps.toml`, or to check one: `tos-recomp/scripts/disc-hashes.sh DISC...` prints the game id, disc number, version byte, size, whole-image SHA-1 and `content_sha1` of each image (ISO, RVZ and the other formats, or a `.7z` holding one); the SHA-1 must equal the Redump one before the values go into the file.
+
 ## 2. Generate, build, run
 
 ```
