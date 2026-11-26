@@ -45,6 +45,12 @@ std::string redump_name(const torecomp::DiscRecord& d) {
   return s;
 }
 
+// The status a disc gets: that of its release when the image is one of the known dumps, "unsupported" otherwise.
+std::string effective_status(const torecomp::Identification& id) {
+  if (id.level == torecomp::Level::Unknown || !id.release) return "unsupported";
+  return torecomp::to_string(id.release->status);
+}
+
 // ---------------------------------------------------------------------------------------------
 // verify
 
@@ -127,12 +133,16 @@ class VerifyStage : public Stage {
           // image to look for.
           ctx.rep.warn(u8(f.path) + " is not the retail data of '" + dd.title + "' (its game files differ from the known dump), "
                        "the build may fail or the game may not work. The verified image is " + redump_name(dd) + ", " +
-                       std::to_string(dd.size) + " bytes. whole-image SHA-1 " + f.id.sha1 + ", content_sha1 " + f.id.content_sha1);
+                       std::to_string(dd.size) + " bytes. This image is treated as unsupported. whole-image SHA-1 " + f.id.sha1 +
+                       ", content_sha1 " + f.id.content_sha1);
         }
         if (dd.game_id != plan_->toolkit.game_id) {
           ctx.rep.warn(u8(f.path) + " is " + f.id.release->title + " (" + dd.game_id + "), this build is made for " +
                        plan_->toolkit.game_id + ": the recompiled code and the symbols are those of " + plan_->toolkit.game_id +
                        ", it will probably not work.");
+        } else if (f.id.level != torecomp::Level::Unknown && effective_status(f.id) == "unsupported") {
+          ctx.rep.warn(u8(f.path) + " is a known dump of " + f.id.release->title + ", a release that has not been tested yet: " +
+                       "the build may fail or the game may not work.");
         }
         ctx.rep.log(u8(f.path) + ": " + torecomp::to_string(f.id.level) + ", " + f.id.release->title + ", disc " +
                     std::to_string(f.id.disc->disc_number + 1) + ", " + f.format);
@@ -175,6 +185,7 @@ class VerifyStage : public Stage {
       d["format"] = f.format;
       d["level"] = f.id.level == torecomp::Level::RedumpVerified ? "redump-verified"
                    : f.id.level == torecomp::Level::Compatible ? "compatible" : "unverified";
+      d["status"] = effective_status(f.id);
       d["sha1"] = f.id.sha1;
       d["content_sha1"] = f.id.level == torecomp::Level::Unknown ? f.id.content_sha1 : f.id.disc->content_sha1;
       d["bytes"] = f.bytes;
@@ -185,9 +196,17 @@ class VerifyStage : public Stage {
     info["discs"] = std::move(discs);
     info["release"] = found[0].id.release->id;
     info["title"] = found[0].id.release->title;
+    // Supported only when every image is a known dump of a tested release; an image that is not one of the known
+    // dumps (not in Redump, or its files differ) is "unsupported", whatever its release.
+    std::string status = torecomp::to_string(found[0].id.release->status);
+    for (const auto& f : found) {
+      if (effective_status(f.id) == "unsupported") status = "unsupported";
+    }
+    info["status"] = status;
     ctx.state.at(name()).info = std::move(info);
     ctx.state.meta["game_id"] = plan_->toolkit.game_id;
     ctx.state.meta["release"] = found[0].id.release->title;
+    ctx.state.meta["status"] = status;
   }
 
  private:
@@ -747,6 +766,7 @@ class FinalizeStage : public Stage {
       Json j = Json::object();
       j["disc"] = d.get("disc");
       j["level"] = d.get("level");
+      j["status"] = d.get("status");
       j["content_sha1"] = d.get("content_sha1");
       discs.push(std::move(j));
     }

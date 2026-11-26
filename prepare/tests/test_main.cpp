@@ -562,6 +562,8 @@ static void test_end_to_end() {
   CHECK(!st.get("versions").get("symbols_sha1").str().empty());
   CHECK_EQ(st.get("discs").items().size(), std::size_t(2));
   CHECK_EQ(st.get("discs").items()[0].get("level").str(), std::string("compatible"));
+  CHECK_EQ(st.get("discs").items()[0].get("status").str(), std::string("alpha"));  // the release's own status
+  CHECK_EQ(st.get("status").str(), std::string("alpha"));
   CHECK_EQ(st.get("stages").get("compile").get("info").get("compiled").num(), 4.0);  // 3 generated + main.cpp
   CHECK(slurp(data / "logs" / "prepare.log").find("[cxx recomp_0000.cpp]") == std::string::npos || true);
 
@@ -659,6 +661,8 @@ static void test_failures() {
     }
     CHECK(names_the_image);
     CHECK_EQ(Json::parse(slurp(t.dir / "i5" / "prepare.json")).get("discs").items()[0].get("level").str(), std::string("unverified"));
+    CHECK_EQ(Json::parse(slurp(t.dir / "i5" / "prepare.json")).get("discs").items()[0].get("status").str(), std::string("unsupported"));
+    CHECK_EQ(Json::parse(slurp(t.dir / "i5" / "prepare.json")).get("status").str(), std::string("unsupported"));
   }
   // toolkit problems
   CHECK_EQ(run_cli([&] { auto a = base_args(d, t.dir / "i6", tk); a[a.size() - 5] = (t.dir / "no-toolkit").string(); return a; }()).exit, kNoToolchain);

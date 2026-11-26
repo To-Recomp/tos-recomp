@@ -17,8 +17,8 @@ id = "gqsf"
 platform = "gamecube"
 region = "France (PAL)"
 title = "Tales of Symphonia (France)"
-status = "unsupported"   # no recomp yet
-tested = false
+status = "alpha"         # boots, plays through the first battles (docs/m2-findings.md); disc 2 untested
+tested = true            # played by the owner on the real discs
 
 [[release.disc]]
 game_id = "GQSF"
