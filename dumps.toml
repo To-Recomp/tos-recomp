@@ -27,6 +27,7 @@ version = 0
 size = 1459978240
 title = "Tales of Symphonia (France) (Disc 1)"
 redump_id = 6511
+serial = "DL-DOL-GQSF-0-FRA"
 sha1 = "d38365eb13f09f185b058826ec3f45e6e1118e66"
 content_sha1 = "6b3a61249783be93ae1880fc90eb36dd0cd8f079"
 
@@ -37,5 +38,180 @@ version = 0
 size = 1459978240
 title = "Tales of Symphonia (France) (Disc 2)"
 redump_id = 6512
+serial = "DL-DOL-GQSF-1-FRA"
 sha1 = "d66b673c9979be546c2253b5de96337981273335"
 content_sha1 = "a3c22ec688780cf92162953623358f18b9f515c1"
+
+# The releases below are listed from Redump (serial, entry, size, whole-image SHA-1) so that tos-prepare can name
+# them. None has a content_sha1 yet (it needs a verified image: `torecomp-disc manifest <disc.iso>`), none has
+# symbols or a recompile: the code and symbols of this build are those of the French release (GQSF). Whether their
+# main.dol and .rel files equal the French ones is not known. `version` is assumed 0 (the header byte is not
+# in Redump's page): an image with another version byte is not matched by its header.
+
+[[release]]
+id = "gqse"
+platform = "gamecube"
+region = "United States (NTSC-U)"
+title = "Tales of Symphonia (USA)"
+status = "unsupported"
+tested = false
+
+[[release.disc]]
+game_id = "GQSE"
+disc = 0
+version = 0
+size = 1459978240
+title = "Tales of Symphonia (USA) (Disc 1)"
+redump_id = 1279
+serial = "DL-DOL-GQSE-0-USA"
+sha1 = "99d8668e9badd485879b7374339ddd9e1ffc80b6"
+
+[[release.disc]]
+game_id = "GQSE"
+disc = 1
+version = 0
+size = 1459978240
+title = "Tales of Symphonia (USA) (Disc 2)"
+redump_id = 1280
+serial = "DL-DOL-GQSE-1-USA"
+sha1 = "b069c1d6cff7364230c5730c4cb513cab896ed63"
+
+[[release]]
+id = "gtoj"
+platform = "gamecube"
+region = "Japan (NTSC-J)"
+title = "Tales of Symphonia (Japan)"
+status = "unsupported"
+tested = false
+
+[[release.disc]]
+game_id = "GTOJ"
+disc = 0
+version = 0
+size = 1459978240
+title = "Tales of Symphonia (Japan) (Disc 1)"
+redump_id = 5383
+serial = "DL-DOL-GTOJ-0-JPN"
+sha1 = "e3dcaf683a21a14ed406db0f4e7bba464a17fe0a"
+
+[[release.disc]]
+game_id = "GTOJ"
+disc = 1
+version = 0
+size = 1459978240
+title = "Tales of Symphonia (Japan) (Disc 2)"
+redump_id = 5384
+serial = "DL-DOL-GTOJ-1-JPN"
+sha1 = "36aba753b7729f75705b8a04f0bf0a5f7fd83d51"
+
+[[release]]
+id = "gqsd"
+platform = "gamecube"
+region = "Germany (PAL)"
+title = "Tales of Symphonia (Germany)"
+status = "unsupported"
+tested = false
+
+[[release.disc]]
+game_id = "GQSD"
+disc = 0
+version = 0
+size = 1459978240
+title = "Tales of Symphonia (Germany) (Disc 1)"
+redump_id = 5079
+serial = "DL-DOL-GQSD-0-NOE"
+sha1 = "38ac71a99713119025d5b80dadaa5cf710b73830"
+
+[[release.disc]]
+game_id = "GQSD"
+disc = 1
+version = 0
+size = 1459978240
+title = "Tales of Symphonia (Germany) (Disc 2)"
+redump_id = 5080
+serial = "DL-DOL-GQSD-1-NOE"
+sha1 = "5f1dafa0ddf231ecbf679ea1b87e4c839803a663"
+
+[[release]]
+id = "gqsi"
+platform = "gamecube"
+region = "Italy (PAL)"
+title = "Tales of Symphonia (Italy)"
+status = "unsupported"
+tested = false
+
+[[release.disc]]
+game_id = "GQSI"
+disc = 0
+version = 0
+size = 1459978240
+title = "Tales of Symphonia (Italy) (Disc 1)"
+redump_id = 24749
+serial = "DL-DOL-GQSI-0-ITA"
+sha1 = "ed8d2fcf8e9ff1658bd27fce31a41f1940281d9f"
+
+[[release.disc]]
+game_id = "GQSI"
+disc = 1
+version = 0
+size = 1459978240
+title = "Tales of Symphonia (Italy) (Disc 2)"
+redump_id = 24750
+serial = "DL-DOL-GQSI-1-ITA"
+sha1 = "54419b0edba98fc85ebc07e74594caa2db4add87"
+
+[[release]]
+id = "gqsp"
+platform = "gamecube"
+region = "United Kingdom (PAL)"
+title = "Tales of Symphonia (United Kingdom)"
+status = "unsupported"
+tested = false
+
+[[release.disc]]
+game_id = "GQSP"
+disc = 0
+version = 0
+size = 1459978240
+title = "Tales of Symphonia (United Kingdom) (Disc 1)"
+redump_id = 9482
+serial = "DL-DOL-GQSP-0-UKV"
+sha1 = "7d8f0e31d7226f70b0810622e8a455c4e4fc6a2a"
+
+[[release.disc]]
+game_id = "GQSP"
+disc = 1
+version = 0
+size = 1459978240
+title = "Tales of Symphonia (United Kingdom) (Disc 2)"
+redump_id = 9483
+serial = "DL-DOL-GQSP-1-UKV"
+sha1 = "74636b61d1ee02e46b8e927265ee5329a4860990"
+
+[[release]]
+id = "gqss"
+platform = "gamecube"
+region = "Spain (PAL)"
+title = "Tales of Symphonia (Spain)"
+status = "unsupported"
+tested = false
+
+[[release.disc]]
+game_id = "GQSS"
+disc = 0
+version = 0
+size = 1459978240
+title = "Tales of Symphonia (Spain) (Disc 1)"
+redump_id = 21427
+serial = "DL-DOL-GQSS-0-ESP"
+sha1 = "c5b22d4feab05f54a50c5e7bd22ca78525d01bf2"
+
+[[release.disc]]
+game_id = "GQSS"
+disc = 1
+version = 0
+size = 1459978240
+title = "Tales of Symphonia (Spain) (Disc 2)"
+redump_id = 21428
+serial = "DL-DOL-GQSS-1-ESP"
+sha1 = "0d51d99a86177795e2347d17986da5c03c81f9a6"

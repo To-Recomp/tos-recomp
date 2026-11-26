@@ -131,7 +131,7 @@ inline std::string dumps_toml(const std::string& game_id, const std::vector<std:
     torecomp::gcm::Image img(p);
     const auto m = torecomp::build_manifest(img);
     toml << "[[release.disc]]\ngame_id = \"" << game_id << "\"\ndisc = " << n++ << "\nversion = 0\nsize = " << img.size()
-         << "\ntitle = \"Test Game disc " << n << "\"\ncontent_sha1 = \"" << m.content_sha1 << "\"\n";
+         << "\ntitle = \"Test Game disc " << n << "\"\nserial = \"DL-DOL-" << game_id << "-" << (n - 1) << "-TST\"\ncontent_sha1 = \"" << m.content_sha1 << "\"\n";
   }
   return toml.str();
 }

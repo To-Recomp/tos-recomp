@@ -38,6 +38,13 @@ std::string join(const std::vector<std::string>& v, const char* sep = " ") {
   return s;
 }
 
+// How to find the verified image of a disc: its Redump serial, and the entry when known.
+std::string redump_name(const torecomp::DiscRecord& d) {
+  std::string s = d.serial.empty() ? "'" + d.title + "'" : "Redump " + d.serial;
+  if (d.redump_id) s += " (redump.org/disc/" + std::to_string(*d.redump_id) + ")";
+  return s;
+}
+
 // ---------------------------------------------------------------------------------------------
 // verify
 
@@ -110,17 +117,22 @@ class VerifyStage : public Stage {
           }
         }
         if (!f.id.release || !f.id.disc) {
-          throw Error(kBadDump, u8(f.path) + " is not a recognised dump (it is not a known dump of " + plan_->toolkit.game_id +
-                                    "). whole-image SHA-1 " + f.id.sha1);
+          throw Error(kBadDump, u8(f.path) + " is not a recognised dump (it is not a known dump of " + plan_->toolkit.game_id + ")" +
+                                    (f.id.sha1.empty() ? std::string() : ". whole-image SHA-1 " + f.id.sha1));
         }
+        const auto& dd = *f.id.disc;
         if (f.id.level == torecomp::Level::Unknown) {
           // The header names a known release but the game files differ (another dump, scrubbed, rebuilt, damaged):
-          // not blocking, the player may know what they are doing. The build goes on, the player is told.
-          const auto& dd = *f.id.disc;
+          // not blocking, the player may know what they are doing. The build goes on, the player is told which
+          // image to look for.
           ctx.rep.warn(u8(f.path) + " is not the retail data of '" + dd.title + "' (its game files differ from the known dump), "
-                       "the build may fail or the game may not work. A verified image is " + std::to_string(dd.size) + " bytes" +
-                       (dd.redump_id ? ", Redump entry " + std::to_string(*dd.redump_id) : std::string()) +
-                       ". whole-image SHA-1 " + f.id.sha1 + ", content_sha1 " + f.id.content_sha1);
+                       "the build may fail or the game may not work. The verified image is " + redump_name(dd) + ", " +
+                       std::to_string(dd.size) + " bytes. whole-image SHA-1 " + f.id.sha1 + ", content_sha1 " + f.id.content_sha1);
+        }
+        if (dd.game_id != plan_->toolkit.game_id) {
+          ctx.rep.warn(u8(f.path) + " is " + f.id.release->title + " (" + dd.game_id + "), this build is made for " +
+                       plan_->toolkit.game_id + ": the recompiled code and the symbols are those of " + plan_->toolkit.game_id +
+                       ", it will probably not work.");
         }
         ctx.rep.log(u8(f.path) + ": " + torecomp::to_string(f.id.level) + ", " + f.id.release->title + ", disc " +
                     std::to_string(f.id.disc->disc_number + 1) + ", " + f.format);

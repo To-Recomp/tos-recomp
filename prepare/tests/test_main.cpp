@@ -653,6 +653,11 @@ static void test_failures() {
     CliResult r = run_cli(a);
     CHECK_EQ(r.exit, 0);
     CHECK(r.has("warn "));
+    bool names_the_image = false;
+    for (const auto& l : r.lines) {
+      if (l.compare(0, 5, "warn ") == 0 && l.find("Redump DL-DOL-TEST-0-TST") != std::string::npos) names_the_image = true;
+    }
+    CHECK(names_the_image);
     CHECK_EQ(Json::parse(slurp(t.dir / "i5" / "prepare.json")).get("discs").items()[0].get("level").str(), std::string("unverified"));
   }
   // toolkit problems
