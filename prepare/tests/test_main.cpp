@@ -643,7 +643,7 @@ static void test_failures() {
     CHECK_EQ(r.exit, 0);
     CHECK(r.has("warn "));
   }
-  // a damaged disc: flip a byte in a game file; the database no longer recognises it
+  // a disc whose header is known but whose game files differ (flip a byte): a warning, not a refusal
   {
     auto bytes = slurp(d.d1);
     bytes[synth::kFiles + 5] ^= 0xFF;
@@ -651,8 +651,9 @@ static void test_failures() {
     auto a = base_args(d, t.dir / "i5", tk);
     a[0] = (t.dir / "bad.iso").string();
     CliResult r = run_cli(a);
-    CHECK_EQ(r.exit, kBadDump);
-    CHECK(r.lines.back().find("not a recognised dump") != std::string::npos);
+    CHECK_EQ(r.exit, 0);
+    CHECK(r.has("warn "));
+    CHECK_EQ(Json::parse(slurp(t.dir / "i5" / "prepare.json")).get("discs").items()[0].get("level").str(), std::string("unverified"));
   }
   // toolkit problems
   CHECK_EQ(run_cli([&] { auto a = base_args(d, t.dir / "i6", tk); a[a.size() - 5] = (t.dir / "no-toolkit").string(); return a; }()).exit, kNoToolchain);

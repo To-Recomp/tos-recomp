@@ -109,11 +109,18 @@ class VerifyStage : public Stage {
             f.rel_bytes += e.size;
           }
         }
+        if (!f.id.release || !f.id.disc) {
+          throw Error(kBadDump, u8(f.path) + " is not a recognised dump (it is not a known dump of " + plan_->toolkit.game_id +
+                                    "). whole-image SHA-1 " + f.id.sha1);
+        }
         if (f.id.level == torecomp::Level::Unknown) {
-          std::string why = f.id.release ? "its header matches '" + f.id.release->title + "' but the game files differ from the known dump"
-                                         : "it is not a known dump of " + plan_->toolkit.game_id;
-          throw Error(kBadDump, u8(f.path) + " is not a recognised dump (" + why + "). whole-image SHA-1 " + f.id.sha1 +
-                                    (f.id.content_sha1.empty() ? "" : ", content_sha1 " + f.id.content_sha1));
+          // The header names a known release but the game files differ (another dump, scrubbed, rebuilt, damaged):
+          // not blocking, the player may know what they are doing. The build goes on, the player is told.
+          const auto& dd = *f.id.disc;
+          ctx.rep.warn(u8(f.path) + " is not the retail data of '" + dd.title + "' (its game files differ from the known dump), "
+                       "the build may fail or the game may not work. A verified image is " + std::to_string(dd.size) + " bytes" +
+                       (dd.redump_id ? ", Redump entry " + std::to_string(*dd.redump_id) : std::string()) +
+                       ". whole-image SHA-1 " + f.id.sha1 + ", content_sha1 " + f.id.content_sha1);
         }
         ctx.rep.log(u8(f.path) + ": " + torecomp::to_string(f.id.level) + ", " + f.id.release->title + ", disc " +
                     std::to_string(f.id.disc->disc_number + 1) + ", " + f.format);
@@ -131,6 +138,10 @@ class VerifyStage : public Stage {
     }
     std::vector<torecomp::Identification> ids;
     for (const auto& f : found) ids.push_back(f.id);
+    // An unverified image still stands for the disc its header names.
+    for (auto& id : ids) {
+      if (id.level == torecomp::Level::Unknown) id.level = torecomp::Level::Compatible;
+    }
     const auto missing = torecomp::missing_discs(*found[0].id.release, ids);
     if (!missing.empty()) {
       std::string list;
@@ -150,9 +161,10 @@ class VerifyStage : public Stage {
       d["disc"] = static_cast<int>(f.id.disc->disc_number + 1);
       d["file"] = u8(fs::absolute(f.path));
       d["format"] = f.format;
-      d["level"] = f.id.level == torecomp::Level::RedumpVerified ? "redump-verified" : "compatible";
+      d["level"] = f.id.level == torecomp::Level::RedumpVerified ? "redump-verified"
+                   : f.id.level == torecomp::Level::Compatible ? "compatible" : "unverified";
       d["sha1"] = f.id.sha1;
-      d["content_sha1"] = f.id.disc->content_sha1;
+      d["content_sha1"] = f.id.level == torecomp::Level::Unknown ? f.id.content_sha1 : f.id.disc->content_sha1;
       d["bytes"] = f.bytes;
       d["dol_bytes"] = f.dol_bytes;
       d["rel_bytes"] = f.rel_bytes;
