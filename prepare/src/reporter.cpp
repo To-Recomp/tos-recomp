@@ -81,6 +81,11 @@ void Reporter::warn(const std::string& text) {
   line("warn " + one_line(text));
 }
 
+void Reporter::release(const std::string& id, const std::string& status, const std::string& title) {
+  std::lock_guard<std::mutex> lock(mu_);
+  line("release " + id + " " + status + " " + one_line(title));
+}
+
 void Reporter::result(const std::string& state, int code, const std::string& text) {
   std::lock_guard<std::mutex> lock(mu_);
   line("result " + state + " " + std::to_string(code) + " " + one_line(text));

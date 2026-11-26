@@ -32,6 +32,8 @@ class Reporter {
   void stage_progress(std::uint64_t done, std::uint64_t total, const std::string& text);
   void stage_end(const std::string& status, double seconds);
   void warn(const std::string& text);
+  // `release <id> <status> <title>`: which release the discs were found to be (additive; the launcher ignores it).
+  void release(const std::string& id, const std::string& status, const std::string& title);
   void result(const std::string& state, int code, const std::string& text);
   void log(const std::string& text);  // log file only
   const std::string& stage() const { return stage_; }

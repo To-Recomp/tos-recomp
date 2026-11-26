@@ -523,6 +523,8 @@ static void test_end_to_end() {
   CliResult r1 = run_cli(base_args(d, data, tk));
   CHECK_EQ(r1.exit, 0);
   CHECK(r1.has("protocol 1 tos-prepare "));
+  CHECK(r1.has("release test alpha Test Game"));  // which release the discs were found to be
+  CHECK_EQ(Json::parse(slurp(data / "prepare.json")).get("release_id").str(), std::string("test"));
   CHECK_EQ(stage_names(r1, "ok").size(), std::size_t(5));
   CHECK_EQ(r1.lines.back().compare(0, 15, "result ready 0 "), 0);
   // stage order
@@ -534,7 +536,7 @@ static void test_end_to_end() {
   for (const auto& l : r1.lines) {
     const bool known = l.compare(0, 9, "protocol ") == 0 || l.compare(0, 12, "stage-start ") == 0 || l.compare(0, 15, "stage-progress ") == 0 ||
                        l.compare(0, 9, "progress ") == 0 || l.compare(0, 10, "stage-end ") == 0 || l.compare(0, 5, "warn ") == 0 ||
-                       l.compare(0, 7, "result ") == 0;
+                       l.compare(0, 7, "result ") == 0 || l.compare(0, 8, "release ") == 0;
     CHECK(known);
     if (l.compare(0, 9, "progress ") == 0) {
       const double v = std::atof(l.c_str() + 9);
@@ -562,6 +564,8 @@ static void test_end_to_end() {
   CHECK(!st.get("versions").get("symbols_sha1").str().empty());
   CHECK_EQ(st.get("discs").items().size(), std::size_t(2));
   CHECK_EQ(st.get("discs").items()[0].get("level").str(), std::string("compatible"));
+  CHECK_EQ(st.get("discs").items()[0].get("status").str(), std::string("alpha"));  // the release's own status
+  CHECK_EQ(st.get("status").str(), std::string("alpha"));
   CHECK_EQ(st.get("stages").get("compile").get("info").get("compiled").num(), 4.0);  // 3 generated + main.cpp
   CHECK(slurp(data / "logs" / "prepare.log").find("[cxx recomp_0000.cpp]") == std::string::npos || true);
 
@@ -653,7 +657,14 @@ static void test_failures() {
     CliResult r = run_cli(a);
     CHECK_EQ(r.exit, 0);
     CHECK(r.has("warn "));
+    bool names_the_image = false;
+    for (const auto& l : r.lines) {
+      if (l.compare(0, 5, "warn ") == 0 && l.find("Redump DL-DOL-TEST-0-TST") != std::string::npos) names_the_image = true;
+    }
+    CHECK(names_the_image);
     CHECK_EQ(Json::parse(slurp(t.dir / "i5" / "prepare.json")).get("discs").items()[0].get("level").str(), std::string("unverified"));
+    CHECK_EQ(Json::parse(slurp(t.dir / "i5" / "prepare.json")).get("discs").items()[0].get("status").str(), std::string("unsupported"));
+    CHECK_EQ(Json::parse(slurp(t.dir / "i5" / "prepare.json")).get("status").str(), std::string("unsupported"));
   }
   // toolkit problems
   CHECK_EQ(run_cli([&] { auto a = base_args(d, t.dir / "i6", tk); a[a.size() - 5] = (t.dir / "no-toolkit").string(); return a; }()).exit, kNoToolchain);
