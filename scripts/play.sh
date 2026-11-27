@@ -15,6 +15,10 @@
 # Space = Start; W = Z; Q = L; E = R. A connected gamepad works as well. On a blank card the game asks to
 # format it: choose "Formater".
 #
+# F1 (or the gamepad's Guide button) = settings overlay (To-Recomp/overlay), driven by packaging/recomplauncher.json
+# (TOREC_MANIFEST): video, audio, controls, Quit. It reads and writes settings.toml and input.toml in
+# RECOMPLAUNCHER_DATA (default: <session>/config).
+#
 # F10 = diagnostic bundle: records the next presented frame (draws, GPU state, EFB copies, pictures) into
 # <session>/diag/diag-<n>-<time>/. Press it once while the problem is on screen (for example a blurred
 # scene), wait two seconds, and tell the developers the session name. The bundle holds game pictures:

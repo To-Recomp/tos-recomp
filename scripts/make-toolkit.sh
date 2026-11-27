@@ -3,10 +3,11 @@
 # the headers the generated code includes, the boot harness source, dumps.toml and the symbol files.
 # Everything in it is ours; nothing is derived from the game, so it may be shipped.
 #
-#   scripts/make-toolkit.sh --gcrecomp DIR --out DIR [--build DIR] [--jobs N] [--no-build] [--fetch-sdl3]
+#   scripts/make-toolkit.sh --gcrecomp DIR --out DIR [--overlay DIR] [--build DIR] [--jobs N] [--no-build] [--fetch-sdl3]
 #                           [--zig PATH --target TRIPLE]
 #
 #   --gcrecomp DIR  a gcrecomp checkout (default: ../gcrecomp next to this repository)
+#   --overlay DIR   a To-Recomp/overlay checkout, the in-game settings menu (default: ../overlay next to this repository)
 #   --out DIR       the toolkit folder to create (replaced if it exists)
 #   --build DIR     gcrecomp build folder (default: $TMPDIR/gcrecomp-toolkit-build); it is configured and
 #                   built unless --no-build is given (use that to reuse an existing build)
@@ -28,11 +29,12 @@
 set -euo pipefail
 
 here="$(cd "$(dirname "$0")/.." && pwd)"
-gcrecomp="$here/../gcrecomp"; out=; build="${TMPDIR:-/var/tmp}/gcrecomp-toolkit-build"; jobs=4; do_build=1; fetch_sdl3=OFF
+gcrecomp="$here/../gcrecomp"; overlay="$here/../overlay"; out=; build="${TMPDIR:-/var/tmp}/gcrecomp-toolkit-build"; jobs=4; do_build=1; fetch_sdl3=OFF
 zig=; target=; PYTHON="${PYTHON:-python3}"
 while [ $# -gt 0 ]; do
   case "$1" in
     --gcrecomp) gcrecomp="$2"; shift 2 ;;
+    --overlay) overlay="$2"; shift 2 ;;
     --out) out="$2"; shift 2 ;;
     --build) build="$2"; shift 2 ;;
     --jobs) jobs="$2"; shift 2 ;;
@@ -46,7 +48,9 @@ while [ $# -gt 0 ]; do
 done
 [ -n "$out" ] || { echo "--out is required" >&2; exit 2; }
 [ -f "$gcrecomp/CMakeLists.txt" ] || { echo "gcrecomp not found at $gcrecomp (--gcrecomp)" >&2; exit 2; }
+[ -f "$overlay/CMakeLists.txt" ] || { echo "overlay not found at $overlay (--overlay)" >&2; exit 2; }
 gcrecomp="$(cd "$gcrecomp" && pwd)"
+overlay="$(cd "$overlay" && pwd)"
 # Windows tools (CMake, Zig) want C:/... paths; under Git Bash `pwd` gives /c/...
 native() { if command -v cygpath >/dev/null 2>&1; then cygpath -m "$1"; else echo "$1"; fi; }
 windows=0; linux_zig=0; exe=
@@ -68,11 +72,15 @@ toolchain=()
 [ "$with_zig" = 1 ] && toolchain=(-DCMAKE_TOOLCHAIN_FILE="$(native "$here/packaging/zig-toolchain.cmake")")
 if [ "$do_build" = 1 ]; then
   cmake -S "$(native "$gcrecomp")" -B "$(native "$build")" -G Ninja -DCMAKE_BUILD_TYPE=Release "${toolchain[@]}" \
-    -DGCRECOMP_BUILD_EXAMPLE=OFF -DGCRECOMP_BUILD_TESTS=OFF -DBUILD_TESTING=OFF -DGCRECOMP_FETCH_SDL3="$fetch_sdl3" >/dev/null
-  cmake --build "$build" -j "$jobs" --target gcrecomp_recompiler gcrecomp_gp gcrecomp_runtime gcrecomp_gx gcrecomp_audio gcrecomp_input
+    -DGCRECOMP_BUILD_EXAMPLE=OFF -DGCRECOMP_BUILD_TESTS=OFF -DBUILD_TESTING=OFF -DGCRECOMP_FETCH_SDL3="$fetch_sdl3" \
+    -DGCRECOMP_OVERLAY_DIR="$(native "$overlay")" -DCMAKE_DISABLE_FIND_PACKAGE_nlohmann_json=ON >/dev/null
+  cmake --build "$build" -j "$jobs" --target gcrecomp_recompiler gcrecomp_gp torecomp_overlay torecomp_overlay_core torecomp_imgui gcrecomp_runtime gcrecomp_gx gcrecomp_audio gcrecomp_input
 fi
-libs=(gcrecomp_gp gcrecomp_runtime gcrecomp_gx gcrecomp_audio gcrecomp_input)
-for l in "${libs[@]}"; do [ -f "$build/lib$l.a" ] || { echo "missing $build/lib$l.a (build first)" >&2; exit 1; }; done
+# The overlay (libtorecomp_overlay, its manifest core and Dear ImGui) follows gcrecomp_gp, which uses it; the player's
+# compile only links them. They are built in subfolders of the build: look them up.
+libs=(gcrecomp_gp torecomp_overlay torecomp_overlay_core torecomp_imgui gcrecomp_runtime gcrecomp_gx gcrecomp_audio gcrecomp_input)
+libfile() { find "$build" -name "lib$1.a" -not -path '*/CMakeFiles/*' 2>/dev/null | head -n 1; }
+for l in "${libs[@]}"; do [ -n "$(libfile "$l")" ] || { echo "missing lib$l.a under $build (build first)" >&2; exit 1; }; done
 [ -f "$build/gcrecomp_recompiler$exe" ] || { echo "missing $build/gcrecomp_recompiler$exe" >&2; exit 1; }
 if [ "$with_zig" = 1 ]; then
   [ -f "$build/_deps/sdl3-build/libSDL3.a" ] || { echo "missing the SDL3 static library in $build/_deps/sdl3-build" >&2; exit 1; }
@@ -81,8 +89,20 @@ fi
 rm -rf "$out"
 mkdir -p "$out/bin" "$out/lib" "$out/include" "$out/src" "$out/symbols"
 cp "$build/gcrecomp_recompiler$exe" "$out/bin/"
-for l in "${libs[@]}"; do cp "$build/lib$l.a" "$out/lib/"; done
+for l in "${libs[@]}"; do cp "$(libfile "$l")" "$out/lib/"; done
 mkdir -p "$out/licenses"
+# Dear ImGui (MIT) is linked into every game: ship its licence, found through the cache of the build.
+imgui_license="$(sed -n 's/^TOREC_IMGUI_LICENSE:[A-Z]*=//p' "$build/CMakeCache.txt" 2>/dev/null | head -n 1)"
+[ -f "$imgui_license" ] || { echo "no Dear ImGui licence: TOREC_IMGUI_LICENSE in $build/CMakeCache.txt is '${imgui_license}' (build with the imgui source fetched)" >&2; exit 1; }
+cp "$imgui_license" "$out/licenses/ImGui-LICENSE.txt"
+# nlohmann/json (MIT, header only) is compiled into libtorecomp_overlay_core.a: ship its licence (fetched by the build).
+json_license="$build/_deps/nlohmann_json-src/LICENSE.MIT"
+[ -f "$json_license" ] || { echo "no nlohmann/json licence at $json_license" >&2; exit 1; }
+cp "$json_license" "$out/licenses/nlohmann-json-LICENSE.txt"
+# The overlay's font (Cabin, SIL OFL 1.1) is compiled into libtorecomp_overlay.a: ship its licence too.
+[ -f "$overlay/src/ui/assets/OFL.txt" ] || { echo "missing $overlay/src/ui/assets/OFL.txt" >&2; exit 1; }
+cp "$overlay/src/ui/assets/OFL.txt" "$out/licenses/OverlayFont-OFL.txt"
+cp "$overlay/LICENSE" "$out/licenses/overlay-LICENSE.txt"
 cp "$gcrecomp/LICENSE" "$out/licenses/gcrecomp-LICENSE.txt"
 if [ "$with_zig" = 1 ]; then
   # SDL3 (zlib licence) is linked statically into the game: ship its library and its licence text.
@@ -114,7 +134,7 @@ fi
 import json, sys
 out, gcrecomp_rev, tos_rev, sys_libs, windows, linux_zig, target = sys.argv[1:8]
 windows, linux_zig = windows == "1", linux_zig == "1"
-libs = ["gcrecomp_gp", "gcrecomp_runtime", "gcrecomp_gx", "gcrecomp_audio", "gcrecomp_input"]
+libs = ["gcrecomp_gp", "torecomp_overlay", "torecomp_overlay_core", "torecomp_imgui", "gcrecomp_runtime", "gcrecomp_gx", "gcrecomp_audio", "gcrecomp_input"]
 tk = {
     "format": 1,
     "game_id": "GQSF",

@@ -41,6 +41,10 @@ jobs:
         with:
           repository: To-Recomp/gcrecomp
           path: gcrecomp
+      - uses: actions/checkout@v4
+        with:
+          repository: To-Recomp/overlay
+          path: overlay
 
       # Build machine only (packaging/linux-build-deps.txt): the static disc codecs for tos-prepare, and the headers SDL3
       # is compiled against (it opens X11, Wayland, ALSA, PulseAudio ... with dlopen at run time, so the player's
@@ -55,6 +59,10 @@ jobs:
         run: |
           if [ "$GITHUB_REF_TYPE" = tag ]; then v="${GITHUB_REF_NAME#v}"; else v="0.0.0-ci.${GITHUB_SHA::7}"; fi
           echo "version=$v" >> "$GITHUB_OUTPUT"
+
+      # The launcher manifests carry the overlay's shared settings fragments (overlay/tools/sync-manifest.py).
+      - name: Manifest check
+        run: tos-recomp/tests/manifest-check.sh
 
       # The pinned Zig (packaging/zig.pin): the compiler that builds the toolkit here and the one packed into tos-prepare.
       - name: Zig
@@ -92,7 +100,7 @@ jobs:
           # ONE file: the toolkit and the compiler are inside it, not next to it.
           test -x "$p/tos-start" && test -x "$p/tos-prepare"
           test ! -e "$p/toolkit" && test ! -e "$p/toolchain"
-          test -f "$p/LICENSE" && test -f "$p/THIRD-PARTY-NOTICES.txt" && for f in Zig-LICENSE.txt LLVM-libcxx-LICENSE.txt SDL3-LICENSE.txt gcrecomp-LICENSE.txt glibc-LICENSES.txt zlib-copyright.txt; do test -f "$p/licenses/$f" || { echo "missing licenses/$f"; exit 1; }; done
+          test -f "$p/LICENSE" && test -f "$p/THIRD-PARTY-NOTICES.txt" && for f in Zig-LICENSE.txt LLVM-libcxx-LICENSE.txt SDL3-LICENSE.txt ImGui-LICENSE.txt nlohmann-json-LICENSE.txt overlay-LICENSE.txt OverlayFont-OFL.txt gcrecomp-LICENSE.txt glibc-LICENSES.txt zlib-copyright.txt; do test -f "$p/licenses/$f" || { echo "missing licenses/$f"; exit 1; }; done
           # Nothing derived from a game may be in the archive.
           if tar -tzf ./*.tar.gz | grep -Ei '\.(iso|dol|rel|gcm|rvz)$|generated|extracted'; then echo "game-derived file in the archive"; exit 1; fi
 
@@ -162,6 +170,10 @@ jobs:
         with:
           repository: To-Recomp/gcrecomp
           path: gcrecomp
+      - uses: actions/checkout@v4
+        with:
+          repository: To-Recomp/overlay
+          path: overlay
 
       - name: Version
         id: version
@@ -235,7 +247,7 @@ jobs:
           LOCALAPPDATA="$(cygpath -m "$d")" "$p/tos-prepare.exe" --data "$(cygpath -m "$d/data")" --check || test $? = 10
           python -c "import json,sys;m=json.load(open(sys.argv[1]));assert m['start']['program']==['tos-start.exe'] and m['prepare']['program']==['tos-prepare.exe'] and m['prepare']['done']==['{data}/bin/tos_boot.exe']" "$p/recomplauncher.json"
           test -f "$p/tos-start.exe" && test -f "$p/LICENSE" && test -f "$p/THIRD-PARTY-NOTICES.txt"
-          for f in Zig-LICENSE.txt LLVM-libcxx-LICENSE.txt SDL3-LICENSE.txt gcrecomp-LICENSE.txt mingw-w64-COPYING.txt zlib-copyright.txt; do test -f "$p/licenses/$f" || { echo "missing licenses/$f"; exit 1; }; done
+          for f in Zig-LICENSE.txt LLVM-libcxx-LICENSE.txt SDL3-LICENSE.txt ImGui-LICENSE.txt nlohmann-json-LICENSE.txt overlay-LICENSE.txt OverlayFont-OFL.txt gcrecomp-LICENSE.txt mingw-w64-COPYING.txt zlib-copyright.txt; do test -f "$p/licenses/$f" || { echo "missing licenses/$f"; exit 1; }; done
           # tos-prepare.exe must not need the Visual C++ runtime or any codec DLL.
           deps="$(python - "$p/tos-prepare.exe" <<'PY'
           import re, sys

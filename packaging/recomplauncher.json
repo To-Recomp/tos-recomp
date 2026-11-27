@@ -6,24 +6,484 @@
       "id": "disc1",
       "role": "disc",
       "label": "Disc 1",
-      "formats": [{ "type": "file", "extensions": ["iso", "gcm", "ciso", "gcz", "rvz", "wia"] }]
+      "formats": [
+        {
+          "type": "file",
+          "extensions": [
+            "iso",
+            "gcm",
+            "ciso",
+            "gcz",
+            "rvz",
+            "wia"
+          ]
+        }
+      ]
     },
     {
       "id": "disc2",
       "role": "disc",
       "label": "Disc 2",
-      "formats": [{ "type": "file", "extensions": ["iso", "gcm", "ciso", "gcz", "rvz", "wia"] }]
+      "formats": [
+        {
+          "type": "file",
+          "extensions": [
+            "iso",
+            "gcm",
+            "ciso",
+            "gcz",
+            "rvz",
+            "wia"
+          ]
+        }
+      ]
     }
   ],
   "prepare": {
-    "program": ["tos-prepare"],
-    "args": ["{input:disc1}", "{input:disc2}", "--data", "{data}", "--resume"],
+    "program": [
+      "tos-prepare"
+    ],
+    "args": [
+      "{input:disc1}",
+      "{input:disc2}",
+      "--data",
+      "{data}",
+      "--resume"
+    ],
     "label": "Checking the discs and building the game on this computer (takes a while; nothing to install)",
-    "done": ["{data}/bin/tos_boot"],
+    "done": [
+      "{data}/bin/tos_boot"
+    ],
     "keeps_copy": true
   },
   "start": {
-    "program": ["tos-start"]
+    "program": [
+      "tos-start"
+    ]
   },
-  "saves": ["{data}/saves"]
+  "saves": [
+    "{data}/saves"
+  ],
+  "config": [
+    {
+      "id": "main",
+      "format": "toml",
+      "file": "{data}/settings.toml"
+    },
+    {
+      "id": "input",
+      "format": "toml",
+      "file": "{data}/input.toml"
+    }
+  ],
+  "settings": [
+    {
+      "id": "fullscreen",
+      "label": "Window mode",
+      "help": "Full screen or a window. The in-game menu (F1, Video) changes the same setting.",
+      "tab": "Display",
+      "group": "Window",
+      "control": "toggle",
+      "choices": [
+        {
+          "label": "Windowed",
+          "set": {
+            "video/fullscreen": "false"
+          }
+        },
+        {
+          "label": "Full screen",
+          "set": {
+            "video/fullscreen": "true"
+          }
+        }
+      ],
+      "defaults": {
+        "video/fullscreen": "false"
+      }
+    },
+    {
+      "id": "vsync",
+      "label": "V-Sync",
+      "help": "Waits for the screen's refresh: no tearing, a little more delay.",
+      "tab": "Display",
+      "group": "Window",
+      "control": "toggle",
+      "choices": [
+        {
+          "label": "Off",
+          "set": {
+            "video/vsync": "false"
+          }
+        },
+        {
+          "label": "On",
+          "set": {
+            "video/vsync": "true"
+          }
+        }
+      ],
+      "defaults": {
+        "video/vsync": "true"
+      }
+    },
+    {
+      "id": "aspect",
+      "label": "Picture shape",
+      "help": "The game is 4:3. The wide choices stretch the picture.",
+      "tab": "Display",
+      "group": "Picture",
+      "choices": [
+        {
+          "label": "Original 4:3",
+          "set": {
+            "video/aspect": "\"fit\""
+          }
+        },
+        {
+          "label": "Fill the window",
+          "set": {
+            "video/aspect": "\"stretch\""
+          }
+        },
+        {
+          "label": "Stretched to 16:9",
+          "set": {
+            "video/aspect": "\"wide16x9\""
+          }
+        },
+        {
+          "label": "Stretched to 21:9",
+          "set": {
+            "video/aspect": "\"wide21x9\""
+          }
+        }
+      ],
+      "defaults": {
+        "video/aspect": "\"fit\""
+      }
+    },
+    {
+      "id": "stats",
+      "label": "Frame-rate counter",
+      "help": "Draws the frames per second over the game.",
+      "tab": "Display",
+      "group": "Picture",
+      "advanced": true,
+      "choices": [
+        {
+          "label": "Off",
+          "set": {
+            "video/stats": "\"off\""
+          }
+        },
+        {
+          "label": "Frame rate",
+          "set": {
+            "video/stats": "\"fps\""
+          }
+        }
+      ],
+      "defaults": {
+        "video/stats": "\"off\""
+      }
+    },
+    {
+      "id": "volume",
+      "label": "Volume",
+      "help": "How loud the game is.",
+      "tab": "Audio",
+      "slider": {
+        "key": "audio/volume",
+        "min": 0,
+        "max": 1,
+        "step": 0.05,
+        "format": "%.2f"
+      },
+      "defaults": {
+        "audio/volume": "1.0"
+      }
+    },
+    {
+      "id": "device",
+      "label": "Output device",
+      "help": "Where the sound plays. Changes take effect at once.",
+      "tab": "Audio",
+      "text": {
+        "key": "audio/device"
+      },
+      "dynamic": {
+        "list": "audio.devices",
+        "key": "audio/device",
+        "empty_label": "System default"
+      },
+      "defaults": {
+        "audio/device": "\"\""
+      }
+    },
+    {
+      "id": "glyphs",
+      "label": "Controller family",
+      "help": "Which controller's button pictures the in-game menu shows.",
+      "tab": "Controls",
+      "group": "Controller",
+      "in": "input",
+      "choices": [
+        {
+          "label": "GameCube",
+          "set": {
+            "glyphs": "\"GameCube\""
+          }
+        },
+        {
+          "label": "Xbox",
+          "set": {
+            "glyphs": "\"Xbox\""
+          }
+        },
+        {
+          "label": "Nintendo",
+          "set": {
+            "glyphs": "\"Nintendo\""
+          }
+        },
+        {
+          "label": "PlayStation",
+          "set": {
+            "glyphs": "\"PlayStation\""
+          }
+        }
+      ],
+      "defaults": {
+        "glyphs": "\"GameCube\""
+      }
+    },
+    {
+      "id": "stick_deadzone",
+      "label": "Stick dead zone",
+      "help": "How far a stick must move before the game sees it.",
+      "tab": "Controls",
+      "group": "Controller",
+      "advanced": true,
+      "in": "input",
+      "slider": {
+        "key": "stick_deadzone",
+        "min": 0,
+        "max": 0.5,
+        "step": 0.01,
+        "format": "%.2f"
+      },
+      "defaults": {
+        "stick_deadzone": "0.125"
+      }
+    },
+    {
+      "id": "keyboard",
+      "label": "Keyboard",
+      "help": "Up to two keys per control. F1 and F10 are reserved for the in-game menu.",
+      "tab": "Controls",
+      "group": "Keyboard",
+      "in": "input",
+      "bindings": {
+        "separator": "|",
+        "max": 2,
+        "names": {
+          "Shift": "Left Shift",
+          "Ctrl": "Left Ctrl",
+          "Alt": "Left Alt",
+          "Page Up": "PageUp",
+          "Page Down": "PageDown",
+          "Caps Lock": "CapsLock"
+        },
+        "actions": [
+          {
+            "label": "A",
+            "key": "keyboard/a"
+          },
+          {
+            "label": "B",
+            "key": "keyboard/b"
+          },
+          {
+            "label": "X",
+            "key": "keyboard/x"
+          },
+          {
+            "label": "Y",
+            "key": "keyboard/y"
+          },
+          {
+            "label": "Start",
+            "key": "keyboard/start"
+          },
+          {
+            "label": "Z",
+            "key": "keyboard/z"
+          },
+          {
+            "label": "L",
+            "key": "keyboard/l"
+          },
+          {
+            "label": "R",
+            "key": "keyboard/r"
+          },
+          {
+            "label": "D-pad up",
+            "key": "keyboard/dpad_up"
+          },
+          {
+            "label": "D-pad down",
+            "key": "keyboard/dpad_down"
+          },
+          {
+            "label": "D-pad left",
+            "key": "keyboard/dpad_left"
+          },
+          {
+            "label": "D-pad right",
+            "key": "keyboard/dpad_right"
+          },
+          {
+            "label": "Control stick up",
+            "key": "keyboard/stick_up"
+          },
+          {
+            "label": "Control stick down",
+            "key": "keyboard/stick_down"
+          },
+          {
+            "label": "Control stick left",
+            "key": "keyboard/stick_left"
+          },
+          {
+            "label": "Control stick right",
+            "key": "keyboard/stick_right"
+          },
+          {
+            "label": "C-stick up",
+            "key": "keyboard/cstick_up"
+          },
+          {
+            "label": "C-stick down",
+            "key": "keyboard/cstick_down"
+          },
+          {
+            "label": "C-stick left",
+            "key": "keyboard/cstick_left"
+          },
+          {
+            "label": "C-stick right",
+            "key": "keyboard/cstick_right"
+          }
+        ]
+      },
+      "defaults": {
+        "keyboard/a": "Return|Z",
+        "keyboard/b": "X|Backspace",
+        "keyboard/x": "C",
+        "keyboard/y": "V",
+        "keyboard/start": "Space",
+        "keyboard/z": "W",
+        "keyboard/l": "Q",
+        "keyboard/r": "E",
+        "keyboard/dpad_up": "Up",
+        "keyboard/dpad_down": "Down",
+        "keyboard/dpad_left": "Left",
+        "keyboard/dpad_right": "Right",
+        "keyboard/stick_up": "Up",
+        "keyboard/stick_down": "Down",
+        "keyboard/stick_left": "Left",
+        "keyboard/stick_right": "Right"
+      }
+    },
+    {
+      "id": "gamepad",
+      "label": "Gamepad",
+      "help": "Buttons only; the sticks are set in the in-game menu (F1, or the Guide button). Names are Xbox positions: A south, B east, X west, Y north.",
+      "tab": "Controls",
+      "group": "Gamepad",
+      "in": "input",
+      "bindings": {
+        "separator": "|",
+        "max": 2,
+        "actions": [
+          {
+            "label": "A",
+            "key": "gamepad/a",
+            "pad": true
+          },
+          {
+            "label": "B",
+            "key": "gamepad/b",
+            "pad": true
+          },
+          {
+            "label": "X",
+            "key": "gamepad/x",
+            "pad": true
+          },
+          {
+            "label": "Y",
+            "key": "gamepad/y",
+            "pad": true
+          },
+          {
+            "label": "Start",
+            "key": "gamepad/start",
+            "pad": true
+          },
+          {
+            "label": "Z",
+            "key": "gamepad/z",
+            "pad": true
+          },
+          {
+            "label": "L",
+            "key": "gamepad/l",
+            "pad": true
+          },
+          {
+            "label": "R",
+            "key": "gamepad/r",
+            "pad": true
+          },
+          {
+            "label": "D-pad up",
+            "key": "gamepad/dpad_up",
+            "pad": true
+          },
+          {
+            "label": "D-pad down",
+            "key": "gamepad/dpad_down",
+            "pad": true
+          },
+          {
+            "label": "D-pad left",
+            "key": "gamepad/dpad_left",
+            "pad": true
+          },
+          {
+            "label": "D-pad right",
+            "key": "gamepad/dpad_right",
+            "pad": true
+          }
+        ]
+      },
+      "defaults": {
+        "gamepad/a": "A",
+        "gamepad/b": "X",
+        "gamepad/x": "B",
+        "gamepad/y": "Y",
+        "gamepad/start": "Start",
+        "gamepad/z": "RB",
+        "gamepad/l": "LT|LB",
+        "gamepad/r": "RT",
+        "gamepad/dpad_up": "D-pad Up",
+        "gamepad/dpad_down": "D-pad Down",
+        "gamepad/dpad_left": "D-pad Left",
+        "gamepad/dpad_right": "D-pad Right"
+      }
+    }
+  ]
 }
