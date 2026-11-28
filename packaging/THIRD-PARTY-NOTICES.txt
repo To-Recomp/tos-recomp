@@ -42,6 +42,23 @@ SDL3  (built from source release 3.2.28 and linked statically into the game exec
     On Linux SDL3 opens the system's X11, Wayland, ALSA, PulseAudio, OpenGL ... libraries with dlopen at run time when
     they exist; none is distributed or linked.
 
+To-Recomp/overlay  (the in-game settings menu, built from source as the static libraries toolkit/lib/libtorecomp_overlay.a and
+    libtorecomp_overlay_core.a and linked into the game executable; MIT licence: licenses/overlay-LICENSE.txt)
+    Source: https://github.com/To-Recomp/overlay. It reads the game's recomplauncher.json to know what to show.
+
+Dear ImGui  (built from source, tag v1.92.5, as the static library toolkit/lib/libtorecomp_imgui.a and linked into the game
+    executable, which the settings menu is drawn with; MIT licence: licenses/ImGui-LICENSE.txt)
+    Copyright (c) 2014-2025 Omar Cornut. Source: https://github.com/ocornut/imgui. Only the library is in the payload:
+    the player's compile uses none of its headers.
+
+nlohmann/json  (v3.11.3, header-only, compiled into libtorecomp_overlay_core.a to read the manifest; MIT licence:
+    licenses/nlohmann-json-LICENSE.txt)
+    Copyright (c) 2013-2022 Niels Lohmann. Source: https://github.com/nlohmann/json.
+
+Cabin  (the settings menu's font, compiled into the game executable from overlay/src/ui/assets; SIL Open Font
+    License 1.1: licenses/OverlayFont-OFL.txt)
+    Copyright 2018 The Cabin Project Authors (https://github.com/impallari/Cabin.git). The font is used unmodified.
+
 Disc codecs inside tos-prepare (statically linked), to read compressed disc images and the payload:
     zlib      (zlib licence)
     bzip2     (bzip2 licence, BSD-style)

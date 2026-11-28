@@ -85,6 +85,14 @@ int run() {
   if (!card.empty() && card.back() != L'\\' && card.back() != L'/') card += L'\\';
   card += L"saves\\card-a.raw";
   SetEnvironmentVariableW(L"GCRECOMP_CARD_IMAGE", card.c_str());
+  // The settings overlay reads the game's manifest, which sits next to this program.
+  wchar_t self[MAX_PATH];
+  const DWORD self_len = GetModuleFileNameW(nullptr, self, MAX_PATH);
+  if (self_len > 0 && self_len < MAX_PATH) {
+    std::wstring manifest(self, self_len);
+    manifest.resize(manifest.find_last_of(L"\\/") + 1);
+    SetEnvironmentVariableW(L"TOREC_MANIFEST", (manifest + L"recomplauncher.json").c_str());
+  }
 
   std::wstring command;
   quote(command, exe);
